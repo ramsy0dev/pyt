@@ -168,9 +168,10 @@ class YouTube:
         """Return streamingData from video info."""
         if 'streamingData' in self.vid_info:
             return self.vid_info['streamingData']
-        else:
-            self.bypass_age_gate()
-            return self.vid_info['streamingData']
+        self.bypass_age_gate()
+        if 'streamingData' not in self.vid_info:
+            raise exceptions.VideoUnavailable(self.video_id)
+        return self.vid_info['streamingData']
 
     @property
     def fmt_streams(self):
