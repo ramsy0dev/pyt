@@ -148,8 +148,7 @@ def video_id(url: str) -> str:
     :returns:
         YouTube video id.
     """
-    return url.split("=")[-1]
-    # return regex_search(r"(?:v=|\/)([0-9A-Za-z_-]{11}).*", url, group=1)
+    return regex_search(r"(?:v=|\/)([0-9A-Za-z_-]{11}).*", url, group=1)
 
 
 def playlist_id(url: str) -> str:
@@ -460,9 +459,7 @@ def apply_signature(stream_manifest: Dict, vid_info: Dict, js: str) -> None:
             k: v[0] for k,v in query_params.items()
         }
         query_params['sig'] = signature
-        if 'ratebypass' not in query_params.keys():
-            # Cipher n to get the updated value
-
+        if 'ratebypass' not in query_params and 'n' in query_params:
             initial_n = list(query_params['n'])
             new_n = cipher.calculate_n(initial_n)
             query_params['n'] = new_n
