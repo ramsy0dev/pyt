@@ -32,11 +32,13 @@ _default_clients = {
         'context': {
             'client': {
                 'clientName': 'WEB',
-                'clientVersion': '2.20200720.00.02'
+                'clientVersion': '2.20241127.01.00',
+                'hl': 'en',
             }
         },
         'header': {
-            'User-Agent': 'Mozilla/5.0'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+            'Accept-Language': 'en-US,en',
         },
         'api_key': 'AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8'
     },
@@ -44,12 +46,16 @@ _default_clients = {
         'context': {
             'client': {
                 'clientName': 'ANDROID',
-                'clientVersion': '17.31.35',
-                'androidSdkVersion': 30
+                'clientVersion': '19.44.37',
+                'androidSdkVersion': 34,
+                'hl': 'en',
+                'userAgent': 'com.google.android.youtube/19.44.37 (Linux; U; Android 14; en_US; Pixel 7; Build/UQ1A.240205.004; Cronet/113.0.5672.24)',
             }
         },
         'header': {
-            'User-Agent': 'com.google.android.youtube/',
+            'User-Agent': 'com.google.android.youtube/19.44.37 (Linux; U; Android 14; en_US; Pixel 7; Build/UQ1A.240205.004; Cronet/113.0.5672.24)',
+            'X-Youtube-Client-Name': '3',
+            'X-Youtube-Client-Version': '19.44.37',
         },
         'api_key': 'AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8'
     },
@@ -57,12 +63,16 @@ _default_clients = {
         'context': {
             'client': {
                 'clientName': 'IOS',
-                'clientVersion': '17.33.2',
-                'deviceModel': 'iPhone14,3'
+                'clientVersion': '19.45.4',
+                'deviceModel': 'iPhone16,2',
+                'hl': 'en',
+                'userAgent': 'com.google.ios.youtube/19.45.4 (iPhone16,2; U; CPU iOS 18_1_0 like Mac OS X)',
             }
         },
         'header': {
-            'User-Agent': 'com.google.ios.youtube/'
+            'User-Agent': 'com.google.ios.youtube/19.45.4 (iPhone16,2; U; CPU iOS 18_1_0 like Mac OS X)',
+            'X-Youtube-Client-Name': '5',
+            'X-Youtube-Client-Version': '19.45.4',
         },
         'api_key': 'AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8'
     },
@@ -71,12 +81,13 @@ _default_clients = {
         'context': {
             'client': {
                 'clientName': 'WEB_EMBEDDED_PLAYER',
-                'clientVersion': '2.20210721.00.00',
-                'clientScreen': 'EMBED'
+                'clientVersion': '2.20241127.01.00',
+                'clientScreen': 'EMBED',
+                'hl': 'en',
             }
         },
         'header': {
-            'User-Agent': 'Mozilla/5.0'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
         },
         'api_key': 'AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8'
     },
@@ -84,13 +95,16 @@ _default_clients = {
         'context': {
             'client': {
                 'clientName': 'ANDROID_EMBEDDED_PLAYER',
-                'clientVersion': '17.31.35',
+                'clientVersion': '19.44.37',
                 'clientScreen': 'EMBED',
-                'androidSdkVersion': 30,
+                'androidSdkVersion': 34,
+                'hl': 'en',
             }
         },
         'header': {
-            'User-Agent': 'com.google.android.youtube/'
+            'User-Agent': 'com.google.android.youtube/19.44.37 (Linux; U; Android 14; en_US; Pixel 7; Build/UQ1A.240205.004; Cronet/113.0.5672.24)',
+            'X-Youtube-Client-Name': '55',
+            'X-Youtube-Client-Version': '19.44.37',
         },
         'api_key': 'AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8'
     },
@@ -98,12 +112,13 @@ _default_clients = {
         'context': {
             'client': {
                 'clientName': 'IOS_MESSAGES_EXTENSION',
-                'clientVersion': '17.33.2',
-                'deviceModel': 'iPhone14,3'
+                'clientVersion': '19.45.4',
+                'deviceModel': 'iPhone16,2',
+                'hl': 'en',
             }
         },
         'header': {
-            'User-Agent': 'com.google.ios.youtube/'
+            'User-Agent': 'com.google.ios.youtube/19.45.4 (iPhone16,2; U; CPU iOS 18_1_0 like Mac OS X)',
         },
         'api_key': 'AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8'
     },
@@ -112,11 +127,12 @@ _default_clients = {
         'context': {
             'client': {
                 'clientName': 'WEB_REMIX',
-                'clientVersion': '1.20220727.01.00',
+                'clientVersion': '1.20241127.01.00',
+                'hl': 'en',
             }
         },
         'header': {
-            'User-Agent': 'Mozilla/5.0'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
         },
         'api_key': 'AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8'
     },
@@ -124,12 +140,13 @@ _default_clients = {
         'context': {
             'client': {
                 'clientName': 'ANDROID_MUSIC',
-                'clientVersion': '5.16.51',
-                'androidSdkVersion': 30
+                'clientVersion': '7.27.52',
+                'androidSdkVersion': 34,
+                'hl': 'en',
             }
         },
         'header': {
-            'User-Agent': 'com.google.android.apps.youtube.music/'
+            'User-Agent': 'com.google.android.apps.youtube.music/7.27.52 (Linux; U; Android 14) gzip',
         },
         'api_key': 'AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8'
     },
@@ -137,12 +154,13 @@ _default_clients = {
         'context': {
             'client': {
                 'clientName': 'IOS_MUSIC',
-                'clientVersion': '5.21',
-                'deviceModel': 'iPhone14,3'
+                'clientVersion': '7.27.0',
+                'deviceModel': 'iPhone16,2',
+                'hl': 'en',
             }
         },
         'header': {
-            'User-Agent': 'com.google.ios.youtubemusic/'
+            'User-Agent': 'com.google.ios.youtubemusic/7.27.0 (iPhone16,2; U; CPU iOS 18_1_0 like Mac OS X)',
         },
         'api_key': 'AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8'
     },
@@ -151,11 +169,12 @@ _default_clients = {
         'context': {
             'client': {
                 'clientName': 'WEB_CREATOR',
-                'clientVersion': '1.20220726.00.00',
+                'clientVersion': '1.20241127.01.00',
+                'hl': 'en',
             }
         },
         'header': {
-            'User-Agent': 'Mozilla/5.0'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
         },
         'api_key': 'AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8'
     },
@@ -163,12 +182,13 @@ _default_clients = {
         'context': {
             'client': {
                 'clientName': 'ANDROID_CREATOR',
-                'clientVersion': '22.30.100',
-                'androidSdkVersion': 30,
+                'clientVersion': '24.45.100',
+                'androidSdkVersion': 34,
+                'hl': 'en',
             }
         },
         'header': {
-            'User-Agent': 'com.google.android.apps.youtube.creator/',
+            'User-Agent': 'com.google.android.apps.youtube.creator/24.45.100 (Linux; U; Android 14) gzip',
         },
         'api_key': 'AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8'
     },
@@ -176,12 +196,13 @@ _default_clients = {
         'context': {
             'client': {
                 'clientName': 'IOS_CREATOR',
-                'clientVersion': '22.33.101',
-                'deviceModel': 'iPhone14,3',
+                'clientVersion': '24.45.100',
+                'deviceModel': 'iPhone16,2',
+                'hl': 'en',
             }
         },
         'header': {
-            'User-Agent': 'com.google.ios.ytcreator/'
+            'User-Agent': 'com.google.ios.ytcreator/24.45.100 (iPhone16,2; U; CPU iOS 18_1_0 like Mac OS X)',
         },
         'api_key': 'AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8'
     },
@@ -190,11 +211,12 @@ _default_clients = {
         'context': {
             'client': {
                 'clientName': 'MWEB',
-                'clientVersion': '2.20220801.00.00',
+                'clientVersion': '2.20241127.00.00',
+                'hl': 'en',
             }
         },
         'header': {
-            'User-Agent': 'Mozilla/5.0'
+            'User-Agent': 'Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36',
         },
         'api_key': 'AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8'
     },
@@ -204,10 +226,11 @@ _default_clients = {
             'client': {
                 'clientName': 'TVHTML5_SIMPLY_EMBEDDED_PLAYER',
                 'clientVersion': '2.0',
+                'hl': 'en',
             }
         },
         'header': {
-            'User-Agent': 'Mozilla/5.0'
+            'User-Agent': 'Mozilla/5.0 (SMART-TV; LINUX; Tizen 6.5) AppleWebKit/538.1 (KHTML, like Gecko) Version/6.5 TV Safari/538.1',
         },
         'api_key': 'AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8'
     },
@@ -218,7 +241,7 @@ _token_file = os.path.join(_cache_dir, 'tokens.json')
 
 class InnerTube:
     """Object for interacting with the innertube API."""
-    def __init__(self, client='ANDROID_MUSIC', use_oauth=False, allow_cache=True):
+    def __init__(self, client='ANDROID', use_oauth=False, allow_cache=True):
         """Initialize an InnerTube object.
 
         :param str client:
