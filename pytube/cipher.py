@@ -40,14 +40,22 @@ class Cipher:
             r"\w+\[(\"\w+\")\]\(\w,(\d+)\)"
         ]
 
-        self.throttling_plan = get_throttling_plan(js)
-        self.throttling_array = get_throttling_function_array(js)
+        try:
+            self.throttling_plan = get_throttling_plan(js)
+            self.throttling_array = get_throttling_function_array(js)
+        except ExtractError:
+            self.throttling_plan = []
+            self.throttling_array = []
 
         self.calculated_n = None
 
     def calculate_n(self, initial_n: list):
         """Converts n to the correct value to prevent throttling."""
         if self.calculated_n:
+            return self.calculated_n
+
+        if not self.throttling_plan:
+            self.calculated_n = ''.join(initial_n)
             return self.calculated_n
 
         # First, update all instances of 'b' with the list(initial_n)
