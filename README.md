@@ -1,90 +1,146 @@
 # pytube
 
 [![CI](https://github.com/ramsy0dev/pytube/actions/workflows/ci.yml/badge.svg)](https://github.com/ramsy0dev/pytube/actions/workflows/ci.yml)
+[![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://python.org)
+[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-An actively maintained fork of pytube — a lightweight, dependency-free Python library (and command-line utility) for downloading YouTube videos, updated to work with the current YouTube API.
+A maintained fork of pytube. The original project went quiet, streams stopped
+working, and I needed it for my own stuff — so I fixed it and kept going.
 
-## What's different from the original
+No dependencies. Pure Python. Does what it says.
 
-- Multi-client fallback strategy: tries ANDROID → IOS → TV_EMBED → page HTML until a working stream source is found
-- Mobile clients return pre-signed stream URLs, so signature deciphering is rarely needed
-- `visitorData` token is automatically extracted from the watch page and sent with API requests
-- Web client versions are read from the live page instead of hardcoded values
-- All 216 tests passing on Python 3.10–3.13
+---
 
-## Installation
+## What's fixed vs the original
+
+YouTube kept changing things. This fork keeps up:
+
+- **Multi-client extraction** — tries ANDROID → IOS → TV embedded → page HTML
+  in order, uses the first one that returns real stream URLs
+- **Pre-signed stream URLs** — mobile clients return URLs that don't need
+  signature deciphering, so downloads just work
+- **visitorData** — extracted automatically from the watch page and sent with
+  API requests (YouTube started requiring this)
+- **Self-updating web client version** — reads the current version from the
+  live page instead of a hardcoded string that goes stale in weeks
+- **Modern progress bar** — shows speed and ETA, not just a percentage
+- **Colourised logger** — compact, readable, disabled automatically when
+  piped to a file or CI
+
+---
+
+## Install
 
 ```bash
 pip install git+https://github.com/ramsy0dev/pytube
 ```
 
-## Quickstart
+---
+
+## Quick start
 
 ```python
 from pytube import YouTube
 
-yt = YouTube('https://www.youtube.com/watch?v=dQw4w9WgXcQ')
-print(yt.title)
-print(yt.length, 'seconds')
+yt = YouTube("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+print(yt.title)   # Rick Astley - Never Gonna Give You Up
+print(yt.length)  # 212  (seconds)
 
-# Download highest resolution
+# highest progressive quality (video + audio in one file)
 yt.streams.get_highest_resolution().download()
 
-# Download audio only
+# audio only
 yt.streams.filter(only_audio=True).first().download()
 
-# Filter and pick
-yt.streams.filter(progressive=True, file_extension='mp4') \
-          .order_by('resolution') \
-          .desc() \
-          .first() \
-          .download()
+# specific resolution
+yt.streams.filter(res="1080p", progressive=False).first().download()
+
+# with progress and completion callbacks
+def show_progress(stream, chunk, remaining):
+    done = stream.filesize - remaining
+    print(f"\r{done / stream.filesize:.1%}", end="")
+
+yt = YouTube(url, on_progress_callback=show_progress)
+yt.streams.get_highest_resolution().download()
 ```
+
+---
 
 ## CLI
 
 ```bash
-# Download highest progressive quality
+# download best quality
 pytube https://www.youtube.com/watch?v=dQw4w9WgXcQ
 
-# List available streams
+# list all streams
 pytube https://www.youtube.com/watch?v=dQw4w9WgXcQ --list
 
-# Download by itag
-pytube https://www.youtube.com/watch?v=dQw4w9WgXcQ --itag=22
+# pick by itag
+pytube https://www.youtube.com/watch?v=dQw4w9WgXcQ --itag=137
 
-# Download audio only
+# specific resolution
+pytube https://www.youtube.com/watch?v=dQw4w9WgXcQ -r 720p
+
+# audio only (default mp4, pass format to override)
 pytube https://www.youtube.com/watch?v=dQw4w9WgXcQ -a
+pytube https://www.youtube.com/watch?v=dQw4w9WgXcQ -a webm
 
-# Download a playlist
-pytube https://www.youtube.com/playlist?list=PLS1QulWo1RIaJECMeUT4LFwJ-ghgoSH6n
+# merge best video + audio with ffmpeg
+pytube https://www.youtube.com/watch?v=dQw4w9WgXcQ -f
+pytube https://www.youtube.com/watch?v=dQw4w9WgXcQ -f 1080p
+
+# save to a specific folder
+pytube https://www.youtube.com/watch?v=dQw4w9WgXcQ -t ~/Downloads
+
+# captions
+pytube https://www.youtube.com/watch?v=dQw4w9WgXcQ --list-captions
+pytube https://www.youtube.com/watch?v=dQw4w9WgXcQ -c en
+
+# download a playlist
+pytube https://www.youtube.com/playlist?list=PLxxxxxxxx
 ```
 
-## Progress callbacks
+---
+
+## Playlists and channels
 
 ```python
-from pytube import YouTube
+from pytube import Playlist
 
-def on_progress(stream, chunk, bytes_remaining):
-    total = stream.filesize
-    downloaded = total - bytes_remaining
-    print(f'{downloaded / total:.1%}')
-
-def on_complete(stream, file_path):
-    print(f'Saved to {file_path}')
-
-yt = YouTube(
-    'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
-    on_progress_callback=on_progress,
-    on_complete_callback=on_complete,
-)
-yt.streams.first().download()
+p = Playlist("https://www.youtube.com/playlist?list=PLxxxxxxxx")
+print(p.title)
+for video in p.videos:
+    video.streams.get_highest_resolution().download()
 ```
 
-## Development
+---
+
+## Known limitations
+
+- **Age-restricted videos** — the bypass works for most, but tier-3
+  age-gated content (country-level) cannot be unlocked without OAuth.
+- **po_token** — YouTube's browser-attestation token is not generated
+  here. If a video returns 403s on web-client streams it will fall
+  back to the mobile client, which usually works without it.
+- **Live streams** — metadata is accessible but downloading live HLS/DASH
+  is not supported.
+
+---
+
+## Dev setup
 
 ```bash
+git clone https://github.com/ramsy0dev/pytube
+cd pytube
 pip install poetry
 poetry install --with dev
 poetry run pytest tests/ -v
 ```
+
+---
+
+## Status
+
+I maintain this in my spare time. It works for everything I've tested.
+If something breaks, open an issue with a video URL and I'll look at it.
+PRs are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
