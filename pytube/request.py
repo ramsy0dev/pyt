@@ -188,8 +188,11 @@ def stream(
                     method="GET",
                     timeout=timeout
                 )
-                content_range = resp.info()["Content-Length"]
-                file_size = int(content_range)
+                content_range = resp.info().get("Content-Range", "")
+                if content_range:
+                    file_size = int(content_range.split("/")[-1])
+                else:
+                    file_size = int(resp.info()["Content-Length"])
             except (KeyError, IndexError, ValueError) as e:
                 logger.error(e)
         while True:
