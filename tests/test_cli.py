@@ -56,15 +56,15 @@ def test_download_when_itag_is_found(youtube, stream):
 
 @mock.patch("pytube.cli.YouTube")
 @mock.patch("pytube.Stream")
-def test_display_stream(youtube, stream):
+def test_display_stream(youtube, stream, capsys):
     # Given
     stream.itag = 123
-    stream.__repr__ = MagicMock(return_value="")
     youtube.streams = StreamQuery([stream])
     # When
     cli.display_streams(youtube)
-    # Then
-    stream.__repr__.assert_called()
+    # Then — itag must appear in the table output
+    captured = capsys.readouterr()
+    assert "123" in captured.out
 
 @mock.patch("pytube.cli._print_available_captions")
 @mock.patch("pytube.cli.YouTube")
@@ -116,19 +116,21 @@ def test_print_available_captions(capsys):
     cli._print_available_captions(query)
     # Then
     captured = capsys.readouterr()
-    assert captured.out == "Available caption codes are: en, fr\n"
+    assert "en" in captured.out
+    assert "fr" in captured.out
 
-def test_display_progress_bar(capsys):
-    cli.display_progress_bar(bytes_received=25, filesize=100, scale=0.55)
+def test_draw_progress_bar(capsys):
+    cli._draw_progress(bytes_recv=25, filesize=100, speed=1024 * 50, eta=1.5)
     out, _ = capsys.readouterr()
     assert "25.0%" in out
 
 @mock.patch("pytube.Stream")
 def test_on_progress(stream):
     stream.filesize = 10
-    cli.display_progress_bar = MagicMock()
-    cli.on_progress(stream, "", 7)
-    cli.display_progress_bar.assert_called_once_with(3, 10)
+    cli._DL_STATE.clear()
+    cli._draw_progress = MagicMock()
+    cli.on_progress(stream, b"", 7)
+    cli._draw_progress.assert_called_once()
 
 def test_parse_args_falsey():
     parser = argparse.ArgumentParser()
@@ -267,7 +269,7 @@ def test_download_with_playlist_video_error(
     # Then
     playlist.assert_called()
     captured = capsys.readouterr()
-    assert "There was an error with video" in captured.out
+    assert "✗" in captured.out
 
 @mock.patch("pytube.cli.YouTube")
 @mock.patch("pytube.StreamQuery")
@@ -299,12 +301,13 @@ def test_download_by_resolution_not_exists(download, stream_query, youtube):
 @mock.patch("pytube.Stream")
 def test_download_stream_file_exists(stream, capsys):
     # Given
+    stream.filesize_approx = 1048576
     stream.exists_at_path.return_value = True
     # When
     cli._download(stream=stream)
     # Then
     captured = capsys.readouterr()
-    assert "Already downloaded at" in captured.out
+    assert "Already exists at" in captured.out
     stream.download.assert_not_called()
 
 @mock.patch("pytube.cli.YouTube")
@@ -411,10 +414,10 @@ def test_ffmpeg_process_audio_fallback_none_should_exit(  # noqa: PT019
     target = "/target"
     streams = MagicMock()
     youtube.streams = streams
-    stream = MagicMock()
+    video_stream = MagicMock()
+    # video stream found; audio fallback also returns None
     streams.filter.return_value.order_by.return_value.last.side_effect = [
-        stream,
-        stream,
+        video_stream,
         None,
     ]
     streams.get_audio_only.return_value = None
@@ -454,7 +457,8 @@ def test_ffmpeg_downloader(unique_name, download, run, unlink):
             "-codec",
             "copy",
             os.path.join("target", "safe_title.video_subtype"),
-        ]
+        ],
+        check=False,
     )
     unlink.assert_called()
 

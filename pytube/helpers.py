@@ -1,6 +1,7 @@
 """Various helper functions implemented by pytube."""
 import os
 import re
+import sys
 import json
 import gzip
 import functools
@@ -21,6 +22,77 @@ from typing import (
 from pytube.exceptions import RegexMatchError
 
 logger = logging.getLogger(__name__)
+
+# ── ANSI colour helpers ───────────────────────────────────────────────────────
+# Colours are emitted only when stderr is an interactive terminal.
+# On Windows, virtual-terminal sequences are activated via the empty os.system
+# call so they work in both Windows Terminal and legacy conhost.
+
+def _ansi_enabled() -> bool:
+    if sys.stderr.isatty():
+        if sys.platform == "win32":
+            os.system("")  # activates ENABLE_VIRTUAL_TERMINAL_PROCESSING
+        return True
+    return False
+
+_USE_COLOUR = _ansi_enabled()
+
+def _c(code: str) -> str:
+    return f"\033[{code}m" if _USE_COLOUR else ""
+
+# Named escapes used by the logger formatter
+RESET   = _c("0")
+BOLD    = _c("1")
+DIM     = _c("2")
+CYAN    = _c("36")
+BLUE    = _c("34")
+MAGENTA = _c("35")
+YELLOW  = _c("33")
+RED     = _c("31")
+BRIGHT_RED    = _c("91")
+BRIGHT_YELLOW = _c("93")
+BRIGHT_CYAN   = _c("96")
+BRIGHT_WHITE  = _c("97")
+
+_STRIP_ANSI = re.compile(r"\033\[[0-9;]*m")
+
+_LEVEL_FMT: Dict[int, tuple] = {
+    logging.DEBUG:    (f"{DIM}{CYAN}",    "DBG"),
+    logging.INFO:     (f"{BLUE}",         "INF"),
+    logging.WARNING:  (f"{BRIGHT_YELLOW}","WRN"),
+    logging.ERROR:    (f"{BRIGHT_RED}",   "ERR"),
+    logging.CRITICAL: (f"{BOLD}{RED}",    "CRT"),
+}
+
+
+class _ColourFormatter(logging.Formatter):
+    """Compact, colourised log formatter for terminal output."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        colour, abbrev = _LEVEL_FMT.get(record.levelno, ("", record.levelname[:3]))
+        ts   = self.formatTime(record, "%H:%M:%S")
+        # Shorten "pytube.foo.bar" → "foo.bar" to keep lines tight
+        name = record.name.removeprefix("pytube.")
+        msg  = record.getMessage()
+
+        line = (
+            f"{DIM}{ts}{RESET}  "
+            f"{colour}{abbrev}{RESET}  "
+            f"{MAGENTA}{name:<20}{RESET}  "
+            f"{msg}"
+        )
+        if record.exc_info:
+            line += "\n" + self.formatException(record.exc_info)
+        return line
+
+
+class _PlainFormatter(logging.Formatter):
+    """Same as _ColourFormatter but with ANSI codes stripped (for log files)."""
+
+    _colour = _ColourFormatter()
+
+    def format(self, record: logging.LogRecord) -> str:
+        return _STRIP_ANSI.sub("", self._colour.format(record))
 
 class DeferredGeneratorList:
     """A wrapper class for deferring list generation.
@@ -186,27 +258,28 @@ def safe_filename(s: str, max_length: int = 255) -> str:
 
 
 def setup_logger(level: int = logging.ERROR, log_filename: Optional[str] = None) -> None:
-    """Create a configured instance of logger.
+    """Configure the pytube logger.
 
     :param int level:
-        Describe the severity level of the logs to handle.
+        Minimum severity level to emit (e.g. logging.DEBUG).
+    :param str log_filename:
+        Optional path to write plain-text (no ANSI) log entries alongside the
+        terminal output.
     """
-    fmt = "[%(asctime)s] %(levelname)s in %(module)s: %(message)s"
-    date_fmt = "%H:%M:%S"
-    formatter = logging.Formatter(fmt, datefmt=date_fmt)
+    root = logging.getLogger("pytube")
+    root.setLevel(level)
 
-    # https://github.com/pytube/pytube/issues/163
-    logger = logging.getLogger("pytube")
-    logger.setLevel(level)
+    # Avoid duplicate handlers if called more than once
+    root.handlers.clear()
 
-    stream_handler = logging.StreamHandler()
-    stream_handler.setFormatter(formatter)
-    logger.addHandler(stream_handler)
+    stderr = logging.StreamHandler()
+    stderr.setFormatter(_ColourFormatter())
+    root.addHandler(stderr)
 
     if log_filename is not None:
-        file_handler = logging.FileHandler(log_filename)
-        file_handler.setFormatter(formatter)
-        logger.addHandler(file_handler)
+        fh = logging.FileHandler(log_filename, encoding="utf-8")
+        fh.setFormatter(_PlainFormatter())
+        root.addHandler(fh)
 
 
 GenericType = TypeVar("GenericType")
