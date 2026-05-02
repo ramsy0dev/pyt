@@ -132,7 +132,7 @@ for video in p.videos:
 
 ```bash
 git clone https://github.com/ramsy0dev/pyt
-cd pytube
+cd pyt
 pip install poetry
 poetry install --with dev
 poetry run pytest tests/ -v

@@ -1,9 +1,7 @@
-"""
-Pytube: a very serious Python library for downloading YouTube Videos.
-"""
+"""pyt — YouTube downloader for Python 3."""
 __title__ = "pyt"
-__author__ = "Ronnie Ghose, Taylor Fox Dahlin, Nick Ficano"
-__license__ = "The Unlicense (Unlicense)"
+__author__ = "ramsy0dev"
+__license__ = "MIT"
 __js__ = None
 __js_url__ = None
 

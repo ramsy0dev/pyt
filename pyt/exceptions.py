@@ -4,7 +4,7 @@ from typing import (
     Union
 )
 
-class PytubeError(Exception):
+class PytError(Exception):
     """Base pyt exception that all others inherit.
 
     This is done to not pollute the built-in exceptions, which *could* result
@@ -13,15 +13,15 @@ class PytubeError(Exception):
     """
 
 
-class MaxRetriesExceeded(PytubeError):
+class MaxRetriesExceeded(PytError):
     """Maximum number of retries exceeded."""
 
 
-class HTMLParseError(PytubeError):
+class HTMLParseError(PytError):
     """HTML could not be parsed"""
 
 
-class ExtractError(PytubeError):
+class ExtractError(PytError):
     """Data extraction based exception."""
 
 
@@ -40,7 +40,7 @@ class RegexMatchError(ExtractError):
         self.pattern = pattern
 
 
-class VideoUnavailable(PytubeError):
+class VideoUnavailable(PytError):
     """Base video unavailable error."""
     def __init__(self, video_id: str):
         """

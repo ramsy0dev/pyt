@@ -501,7 +501,7 @@ def main() -> None:
         for video in playlist.videos:
             try:
                 _perform_args_on_youtube(video, args)
-            except exceptions.PytubeError as exc:
+            except exceptions.PytError as exc:
                 _print_err(f"{video.watch_url}  —  {exc}")
     else:
         sys.stdout.write(f"\n  {DM}Fetching  {args.url} …{R}\n")

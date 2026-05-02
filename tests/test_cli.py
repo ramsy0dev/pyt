@@ -3,7 +3,7 @@ import pytest
 import logging
 import argparse
 
-from pyt.exceptions import PytubeError
+from pyt.exceptions import PytError
 from pyt import (
     cli,
     Caption,
@@ -263,7 +263,7 @@ def test_download_with_playlist_video_error(
     videos = [youtube]
     playlist_instance = playlist.return_value
     playlist_instance.videos = videos
-    perform_args_on_youtube.side_effect = PytubeError()
+    perform_args_on_youtube.side_effect = PytError()
     # When
     cli.main()
     # Then

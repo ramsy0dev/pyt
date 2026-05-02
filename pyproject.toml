@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "pyt"
-version = "0.15.0"
+version = "1.0.0"
 description = "Python 3 library for downloading YouTube videos."
 authors = ["ramsy0dev <ramsy0dev@gmail.com>"]
 readme = "README.md"
