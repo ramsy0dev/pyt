@@ -252,6 +252,7 @@ class InnerTube:
         :param bool allow_cache:
             Allows caching of oauth tokens on the machine.
         """
+        self.client_name = client
         self.context = _default_clients[client]['context']
         self.header = _default_clients[client]['header']
         self.api_key = _default_clients[client]['api_key']

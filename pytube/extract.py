@@ -556,6 +556,30 @@ def initial_player_response(watch_html: str) -> str:
     )
 
 
+def web_client_version(watch_html: str) -> Optional[str]:
+    """Extract the current WEB client version from the watch page.
+
+    YouTube embeds the client version in its ytcfg blob, e.g.:
+    ``ytcfg.set({"INNERTUBE_CLIENT_VERSION":"2.20250101.00.00",...})``.
+    Reading it here means we don't have to update a hardcoded string whenever
+    YouTube increments their deploy version.
+
+    :param str watch_html:
+        The html contents of the watch page.
+    :rtype: Optional[str]
+    :returns:
+        The WEB client version string, or None if not found.
+    """
+    try:
+        return regex_search(
+            r'"INNERTUBE_CLIENT_VERSION"\s*:\s*"([^"]+)"',
+            watch_html,
+            group=1,
+        )
+    except RegexMatchError:
+        return None
+
+
 def metadata(initial_data) -> Optional[YouTubeMetadata]:
     """Get the informational metadata for the video.
 

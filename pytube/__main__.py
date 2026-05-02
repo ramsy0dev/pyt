@@ -33,6 +33,11 @@ from pytube.monostate import Monostate
 
 logger = logging.getLogger(__name__)
 
+# Clients tried in order when fetching player data for non-age-restricted videos.
+# ANDROID and IOS return pre-signed stream URLs (no cipher decryption needed).
+# TV_EMBED provides a fallback for restricted content that slips past the others.
+_PLAYER_CLIENT_PRIORITY = ['ANDROID', 'IOS', 'TV_EMBED']
+
 
 class YouTube:
     """Core developer interface for pytube."""
@@ -261,79 +266,81 @@ class YouTube:
     def vid_info(self):
         """Parse the raw vid info and return the parsed result.
 
-        Tries the ANDROID innertube client first (returns all adaptive streams
-        with direct URLs). If that returns no usable streams, falls back to the
-        ytInitialPlayerResponse embedded in the watch page HTML (gives at least
-        progressive streams without needing current client versions). Age-
-        restricted videos skip straight to the innertube path.
+        Iterates through _PLAYER_CLIENT_PRIORITY (ANDROID → IOS → TV_EMBED),
+        returning the first response that carries usable streaming data. Falls
+        back to the ytInitialPlayerResponse embedded in the watch page HTML,
+        then finally to whatever the first client returned. Age-restricted
+        videos skip straight to the ANDROID_EMBED client.
 
         :rtype: Dict[Any, Any]
         """
         if self._vid_info:
             return self._vid_info
 
-        innertube_response = None
+        if self.age_restricted:
+            innertube = InnerTube(
+                'ANDROID_EMBED',
+                use_oauth=self.use_oauth,
+                allow_cache=self.allow_oauth_cache,
+            )
+            self._vid_info = innertube.player(self.video_id)
+            return self._vid_info
 
-        if not self.age_restricted:
-            # Primary: ANDROID innertube (pre-signed URLs, all adaptive formats).
+        visitor_data = self._visitor_data
+        first_response = None
+
+        for client in _PLAYER_CLIENT_PRIORITY:
             try:
                 innertube = InnerTube(
+                    client,
                     use_oauth=self.use_oauth,
-                    allow_cache=self.allow_oauth_cache
+                    allow_cache=self.allow_oauth_cache,
                 )
-                innertube_response = innertube.player(
+                response = innertube.player(
                     self.video_id,
-                    visitor_data=self._visitor_data
+                    visitor_data=visitor_data,
                 )
-                status = innertube_response.get('playabilityStatus', {}).get('status')
-                if status == 'OK' and 'streamingData' in innertube_response:
-                    self._vid_info = innertube_response
+                if first_response is None:
+                    first_response = response
+                status = response.get('playabilityStatus', {}).get('status')
+                if status == 'OK' and 'streamingData' in response:
+                    logger.debug("player data from %s client", client)
+                    self._vid_info = response
                     return self._vid_info
             except Exception:
                 pass
 
-            # Fallback: ytInitialPlayerResponse from the watch page HTML.
-            try:
-                player_response = extract.initial_player_response(self.watch_html)
-                status = player_response.get('playabilityStatus', {}).get('status')
-                if status == 'OK' and 'streamingData' in player_response:
-                    self._vid_info = player_response
-                    return self._vid_info
-            except exceptions.RegexMatchError:
-                pass
+        # Fallback: ytInitialPlayerResponse from the watch page HTML.
+        try:
+            player_response = extract.initial_player_response(self.watch_html)
+            status = player_response.get('playabilityStatus', {}).get('status')
+            if status == 'OK' and 'streamingData' in player_response:
+                self._vid_info = player_response
+                return self._vid_info
+        except exceptions.RegexMatchError:
+            pass
 
-        # Use whatever innertube returned (may have no streams), or make a
-        # fresh call for age-restricted content that skipped the block above.
-        if innertube_response is not None:
-            self._vid_info = innertube_response
-        else:
-            innertube = InnerTube(
-                use_oauth=self.use_oauth,
-                allow_cache=self.allow_oauth_cache
-            )
-            self._vid_info = innertube.player(
-                self.video_id,
-                visitor_data=self._visitor_data
-            )
+        self._vid_info = first_response or {}
         return self._vid_info
 
     def bypass_age_gate(self):
         """Attempt to update the vid_info by bypassing the age gate."""
-        innertube = InnerTube(
-            client='ANDROID_EMBED',
-            use_oauth=self.use_oauth,
-            allow_cache=self.allow_oauth_cache
-        )
-        innertube_response = innertube.player(self.video_id)
+        for client in ('ANDROID_EMBED', 'IOS_EMBED', 'TV_EMBED'):
+            try:
+                innertube = InnerTube(
+                    client,
+                    use_oauth=self.use_oauth,
+                    allow_cache=self.allow_oauth_cache,
+                )
+                response = innertube.player(self.video_id)
+                status = response.get('playabilityStatus', {}).get('status')
+                if status not in (None, 'UNPLAYABLE'):
+                    self._vid_info = response
+                    return
+            except Exception:
+                pass
 
-        playability_status = innertube_response['playabilityStatus'].get('status', None)
-
-        # If we still can't access the video, raise an exception
-        # (tier 3 age restriction)
-        if playability_status == 'UNPLAYABLE':
-            raise exceptions.AgeRestrictedError(self.video_id)
-
-        self._vid_info = innertube_response
+        raise exceptions.AgeRestrictedError(self.video_id)
 
     @property
     def caption_tracks(self) -> List[pytube.Caption]:
