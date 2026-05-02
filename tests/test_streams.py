@@ -2,7 +2,7 @@ import os
 import random
 import pytest
 
-from datetime import datetime
+from datetime import datetime, timezone
 from unittest import mock
 from unittest.mock import (
     MagicMock,
@@ -62,7 +62,7 @@ def test_title(cipher_signature):
 
 
 def test_expiration(cipher_signature):
-    assert cipher_signature.streams[0].expiration >= datetime(2020, 10, 30, 5, 39, 41)
+    assert cipher_signature.streams[0].expiration >= datetime(2020, 10, 30, 5, 39, 41, tzinfo=timezone.utc)
 
 
 def test_caption_tracks(presigned_video):
