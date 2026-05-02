@@ -1,44 +1,24 @@
 dev:
-	poetry isntall
-
-poetry:
 	pip install poetry
-	poetry install
+	poetry install --with dev
 
-deploy-patch: clean requirements bumpversion-patch upload clean
+test:
+	poetry run pytest tests/ -v
 
-deploy-minor: clean requirements bumpversion-minor upload clean
-
-deploy-major: clean requirements bumpversion-major upload clean
-
-bumpversion-patch:
-	bumpversion patch
-	git push
-	git push --tags
-
-bumpversion-minor:
-	bumpversion minor
-	git push
-	git push --tags
-
-bumpversion-major:
-	bumpversion major
-	git push
-	git push --tags
+typecheck:
+	poetry run mypy pytube/ --ignore-missing-imports
 
 upload:
 	poetry build
 	twine upload dist/*
 
 help:
-	@echo "clean - remove all build, test, coverage and Python artifacts"
-	@echo "clean-build - remove build artifacts"
-	@echo "clean-pyc - remove Python file artifacts"
-	@echo "install - install the package to the active Python's site-packages"
-
-ci:
-	pip install poetry
-	poetry install
+	@echo "dev        - install all dependencies"
+	@echo "test       - run the test suite"
+	@echo "typecheck  - run mypy"
+	@echo "upload     - build and publish to PyPI"
+	@echo "clean      - remove build and cache artifacts"
+	@echo "install    - install the package in editable mode"
 
 clean: clean-build clean-pyc
 

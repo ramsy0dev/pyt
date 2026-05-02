@@ -1,93 +1,90 @@
-<div align="center">
-  <p>
-    <a href="#"><img src="https://assets.nickficano.com/gh-pytube.min.svg" width="456" height="143" alt="pytube logo" /></a>
-  </p>
-  <p align="center">
-	<a href="https://pypi.org/project/pytube/"><img src="https://img.shields.io/pypi/dm/pytube?style=flat-square" alt="pypi"/></a>
-	<a href="https://pytube.io/en/latest/"><img src="https://readthedocs.org/projects/python-pytube/badge/?version=latest&style=flat-square" /></a>
-	<a href="https://pypi.org/project/pytube/"><img src="https://img.shields.io/pypi/v/pytube?style=flat-square" /></a>
-  </p>
-</div>
-
-### Actively soliciting contributors!
-
-Have ideas for how pytube can be improved? Feel free to open an issue or a pull request!
-
 # pytube
 
-*pytube* is a genuine, lightweight, dependency-free Python library (and command-line utility) for downloading YouTube videos.
+[![CI](https://github.com/ramsy0dev/pytube/actions/workflows/ci.yml/badge.svg)](https://github.com/ramsy0dev/pytube/actions/workflows/ci.yml)
 
-## Documentation
+An actively maintained fork of pytube — a lightweight, dependency-free Python library (and command-line utility) for downloading YouTube videos, updated to work with the current YouTube API.
 
-Detailed documentation about the usage of the library can be found at [pytube.io](https://pytube.io). This is recommended for most cases. If you want to hastily download a single video, the [quick start](#Quickstart) guide below might be what you're looking for.
+## What's different from the original
 
-## Description
+- Multi-client fallback strategy: tries ANDROID → IOS → TV_EMBED → page HTML until a working stream source is found
+- Mobile clients return pre-signed stream URLs, so signature deciphering is rarely needed
+- `visitorData` token is automatically extracted from the watch page and sent with API requests
+- Web client versions are read from the live page instead of hardcoded values
+- All 216 tests passing on Python 3.10–3.13
 
-YouTube is the most popular video-sharing platform in the world and as a hacker, you may encounter a situation where you want to script something to download videos. For this, I present to you: *pytube*.
+## Installation
 
-*pytube* is a lightweight library written in Python. It has no third-party
-dependencies and aims to be highly reliable.
-
-*pytube* also makes pipelining easy, allowing you to specify callback functions for different download events, such as  ``on progress`` or ``on complete``.
-
-Furthermore, *pytube* includes a command-line utility, allowing you to download videos right from the terminal.
-
-## Features
-
-- Support for both progressive & DASH streams
-- Support for downloading the complete playlist
-- Easily register ``on_download_progress`` & ``on_download_complete`` callbacks
-- Command-line interfaced included
-- Caption track support
-- Outputs caption tracks to .srt format (SubRip Subtitle)
-- Ability to capture thumbnail URL
-- Extensively documented source code
-- No third-party dependencies
+```bash
+pip install git+https://github.com/ramsy0dev/pytube
+```
 
 ## Quickstart
 
-This guide covers the most basic usage of the library. For more detailed information, please refer to [pytube.io](https://pytube.io).
+```python
+from pytube import YouTube
 
-### Installation
+yt = YouTube('https://www.youtube.com/watch?v=dQw4w9WgXcQ')
+print(yt.title)
+print(yt.length, 'seconds')
 
-Pytube requires an installation of Python 3.6 or greater, as well as pip. (Pip is typically bundled with Python [installations](https://python.org/downloads).)
+# Download highest resolution
+yt.streams.get_highest_resolution().download()
 
-To install from PyPI with pip:
+# Download audio only
+yt.streams.filter(only_audio=True).first().download()
 
-```bash
-$ python -m pip install pytube
+# Filter and pick
+yt.streams.filter(progressive=True, file_extension='mp4') \
+          .order_by('resolution') \
+          .desc() \
+          .first() \
+          .download()
 ```
 
-Sometimes, the PyPI release becomes slightly outdated. To install from the source with pip:
+## CLI
 
 ```bash
-$ python -m pip install git+https://github.com/pytube/pytube
+# Download highest progressive quality
+pytube https://www.youtube.com/watch?v=dQw4w9WgXcQ
+
+# List available streams
+pytube https://www.youtube.com/watch?v=dQw4w9WgXcQ --list
+
+# Download by itag
+pytube https://www.youtube.com/watch?v=dQw4w9WgXcQ --itag=22
+
+# Download audio only
+pytube https://www.youtube.com/watch?v=dQw4w9WgXcQ -a
+
+# Download a playlist
+pytube https://www.youtube.com/playlist?list=PLS1QulWo1RIaJECMeUT4LFwJ-ghgoSH6n
 ```
 
-### Using pytube in a Python script
-
-To download a video using the library in a script, you'll need to import the YouTube class from the library and pass an argument of the video URL. From there, you can access the streams and download them.
+## Progress callbacks
 
 ```python
- >>> from pytube import YouTube
- >>> YouTube('https://youtu.be/2lAe1cqCOXo').streams.first().download()
- >>> yt = YouTube('http://youtube.com/watch?v=2lAe1cqCOXo')
- >>> yt.streams
-  ... .filter(progressive=True, file_extension='mp4')
-  ... .order_by('resolution')
-  ... .desc()
-  ... .first()
-  ... .download()
+from pytube import YouTube
+
+def on_progress(stream, chunk, bytes_remaining):
+    total = stream.filesize
+    downloaded = total - bytes_remaining
+    print(f'{downloaded / total:.1%}')
+
+def on_complete(stream, file_path):
+    print(f'Saved to {file_path}')
+
+yt = YouTube(
+    'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+    on_progress_callback=on_progress,
+    on_complete_callback=on_complete,
+)
+yt.streams.first().download()
 ```
 
-### Using the command-line interface
+## Development
 
-Using the CLI is remarkably straightforward as well. To download a video at the highest progressive quality, you can use the following command:
 ```bash
-$ pytube https://youtube.com/watch?v=2lAe1cqCOXo
-```
-
-You can also do the same for a playlist:
-```bash
-$ pytube https://www.youtube.com/playlist?list=PLS1QulWo1RIaJECMeUT4LFwJ-ghgoSH6n
+pip install poetry
+poetry install --with dev
+poetry run pytest tests/ -v
 ```
