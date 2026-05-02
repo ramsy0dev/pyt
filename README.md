@@ -1,7 +1,7 @@
 # pyt
 ### formerly pytube
 
-[![CI](https://github.com/ramsy0dev/pytube/actions/workflows/ci.yml/badge.svg)](https://github.com/ramsy0dev/pytube/actions/workflows/ci.yml)
+[![CI](https://github.com/ramsy0dev/pyt/actions/workflows/ci.yml/badge.svg)](https://github.com/ramsy0dev/pyt/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://python.org)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
@@ -33,7 +33,7 @@ YouTube kept changing things. This fork keeps up:
 ## Install
 
 ```bash
-pip install git+https://github.com/ramsy0dev/pytube
+pip install git+https://github.com/ramsy0dev/pyt
 ```
 
 ---
@@ -131,7 +131,7 @@ for video in p.videos:
 ## Dev setup
 
 ```bash
-git clone https://github.com/ramsy0dev/pytube
+git clone https://github.com/ramsy0dev/pyt
 cd pytube
 pip install poetry
 poetry install --with dev

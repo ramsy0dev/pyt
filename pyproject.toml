@@ -5,8 +5,8 @@ description = "Python 3 library for downloading YouTube videos."
 authors = ["ramsy0dev <ramsy0dev@gmail.com>"]
 readme = "README.md"
 license = "MIT"
-homepage = "https://github.com/ramsy0dev/pytube"
-repository = "https://github.com/ramsy0dev/pytube"
+homepage = "https://github.com/ramsy0dev/pyt"
+repository = "https://github.com/ramsy0dev/pyt"
 keywords = ["youtube", "download", "video", "pyt"]
 classifiers = [
     "Programming Language :: Python :: 3",
