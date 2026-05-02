@@ -1,8 +1,6 @@
-```
-┌─────────────────────────────────────────┐
-│  pyt  ·  youtube downloader for python  │
-└─────────────────────────────────────────┘
-```
+<p align="center">
+  <img src="images/pyt-logo.svg" alt="pyt" width="340"/>
+</p>
 
 [![CI](https://github.com/ramsy0dev/pytube/actions/workflows/ci.yml/badge.svg)](https://github.com/ramsy0dev/pytube/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://python.org)
