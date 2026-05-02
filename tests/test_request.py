@@ -5,10 +5,10 @@ import pytest
 from unittest import mock
 from urllib.error import URLError
 
-from pytube import request
-from pytube.exceptions import MaxRetriesExceeded
+from pyt import request
+from pyt.exceptions import MaxRetriesExceeded
 
-@mock.patch("pytube.request.urlopen")
+@mock.patch("pyt.request.urlopen")
 def test_streaming(mock_urlopen):
     # Given
     fake_stream_binary = [
@@ -28,7 +28,7 @@ def test_streaming(mock_urlopen):
     assert mock_response.read.call_count == 4
 
 
-@mock.patch('pytube.request.urlopen')
+@mock.patch('pyt.request.urlopen')
 def test_timeout(mock_urlopen):
     exc = URLError(reason=socket.timeout('timed_out'))
     mock_urlopen.side_effect = exc
@@ -37,7 +37,7 @@ def test_timeout(mock_urlopen):
         next(generator)
 
 
-@mock.patch("pytube.request.urlopen")
+@mock.patch("pyt.request.urlopen")
 def test_headers(mock_urlopen):
     response = mock.Mock()
     response.info.return_value = {"content-length": "16384"}
@@ -46,7 +46,7 @@ def test_headers(mock_urlopen):
     assert response == {"content-length": "16384"}
 
 
-@mock.patch("pytube.request.urlopen")
+@mock.patch("pyt.request.urlopen")
 def test_get(mock_urlopen):
     response = mock.Mock()
     response.read.return_value = "<html></html>".encode("utf-8")

@@ -6,7 +6,7 @@ test:
 	poetry run pytest tests/ -v
 
 typecheck:
-	poetry run mypy pytube/ --ignore-missing-imports
+	poetry run mypy pyt/ --ignore-missing-imports
 
 upload:
 	poetry build

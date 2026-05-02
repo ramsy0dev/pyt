@@ -19,16 +19,16 @@ from urllib.parse import (
     urlparse
 )
 
-from pytube.cipher import Cipher
-from pytube.exceptions import (
+from pyt.cipher import Cipher
+from pyt.exceptions import (
     HTMLParseError,
     LiveStreamError,
     RegexMatchError
 )
 
-from pytube.helpers import regex_search
-from pytube.metadata import YouTubeMetadata
-from pytube.parser import (
+from pyt.helpers import regex_search
+from pyt.metadata import YouTubeMetadata
+from pyt.parser import (
     parse_for_object,
     parse_for_all_objects
 )

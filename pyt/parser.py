@@ -2,7 +2,7 @@ import re
 import ast
 import json
 
-from pytube.exceptions import HTMLParseError
+from pyt.exceptions import HTMLParseError
 
 def parse_for_all_objects(html, preceding_regex):
     """Parses input html to find all matches for the input starting point.

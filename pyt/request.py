@@ -14,11 +14,11 @@ from urllib.request import (
 
 from functools import lru_cache
 
-from pytube.exceptions import (
+from pyt.exceptions import (
     RegexMatchError,
     MaxRetriesExceeded
 )
-from pytube.helpers import regex_search
+from pyt.helpers import regex_search
 
 logger = logging.getLogger(__name__)
 default_range_size = 9437184  # 9MB

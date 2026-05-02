@@ -10,12 +10,12 @@ from typing import (
     Tuple
 )
 
-from pytube import (
+from pyt import (
     extract,
     Playlist,
     request
 )
-from pytube.helpers import uniqueify
+from pyt.helpers import uniqueify
 
 logger = logging.getLogger(__name__)
 

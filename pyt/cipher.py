@@ -17,9 +17,9 @@ import re
 from itertools import chain
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from pytube.exceptions import ExtractError, RegexMatchError
-from pytube.helpers import cache, regex_search
-from pytube.parser import find_object_from_startpoint, throttling_array_split
+from pyt.exceptions import ExtractError, RegexMatchError
+from pyt.helpers import cache, regex_search
+from pyt.parser import find_object_from_startpoint, throttling_array_split
 
 logger = logging.getLogger(__name__)
 

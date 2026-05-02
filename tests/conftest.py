@@ -6,7 +6,7 @@ import gzip
 from unittest import mock
 
 import pytest
-from pytube import YouTube
+from pyt import YouTube
 
 def load_playback_file(filename):
     """Load a gzip json playback file."""
@@ -18,7 +18,7 @@ def load_playback_file(filename):
         return json.loads(content)
 
 
-@mock.patch('pytube.request.urlopen')
+@mock.patch('pyt.request.urlopen')
 def load_and_init_from_playback_file(filename, mock_urlopen):
     """Load a gzip json playback file and create YouTube instance."""
     pb = load_playback_file(filename)

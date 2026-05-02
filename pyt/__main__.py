@@ -1,5 +1,5 @@
 """
-This module implements the core developer interface for pytube.
+This module implements the core developer interface for pyt.
 
 The problem domain of the :class:`YouTube <YouTube> class focuses almost
 exclusively on the developer interface. Pytube offloads the heavy lifting to
@@ -8,8 +8,8 @@ smaller peripheral modules and functions.
 """
 import logging
 import re
-import pytube
-import pytube.exceptions as exceptions
+import pyt
+import pyt.exceptions as exceptions
 
 from datetime import datetime
 from typing import (
@@ -20,16 +20,16 @@ from typing import (
     Optional
 )
 
-from pytube import (
+from pyt import (
     extract,
     request,
     Stream,
     StreamQuery
 )
-from pytube.helpers import install_proxy
-from pytube.innertube import InnerTube
-from pytube.metadata import YouTubeMetadata
-from pytube.monostate import Monostate
+from pyt.helpers import install_proxy
+from pyt.innertube import InnerTube
+from pyt.metadata import YouTubeMetadata
+from pyt.monostate import Monostate
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +43,7 @@ _WEB_CLIENTS = {'WEB', 'WEB_EMBED', 'WEB_MUSIC', 'WEB_CREATOR', 'MWEB', 'TV_EMBE
 
 
 class YouTube:
-    """Core developer interface for pytube."""
+    """Core developer interface for pyt."""
 
     def __init__(
         self,
@@ -65,7 +65,7 @@ class YouTube:
             (Optional) User defined callback function for stream download
             complete events.
         :param dict proxies:
-            (Optional) A dict mapping protocol to proxy address which will be used by pytube.
+            (Optional) A dict mapping protocol to proxy address which will be used by pyt.
         :param bool use_oauth:
             (Optional) Prompt the user to authenticate to YouTube.
             If allow_oauth_cache is set to True, the user should only be prompted once.
@@ -110,7 +110,7 @@ class YouTube:
         self.allow_oauth_cache = allow_oauth_cache
 
     def __repr__(self):
-        return f'<pytube.__main__.YouTube object: videoId={self.video_id}>'
+        return f'<pyt.__main__.YouTube object: videoId={self.video_id}>'
 
     def __eq__(self, o: object) -> bool:
         # Compare types and urls, if they're same return true, else return false.
@@ -156,12 +156,12 @@ class YouTube:
 
         # If the js_url doesn't match the cached url, fetch the new js and update
         #  the cache; otherwise, load the cache.
-        if pytube.__js_url__ != self.js_url:
+        if pyt.__js_url__ != self.js_url:
             self._js = request.get(self.js_url)
-            pytube.__js__ = self._js
-            pytube.__js_url__ = self.js_url
+            pyt.__js__ = self._js
+            pyt.__js_url__ = self.js_url
         else:
-            self._js = pytube.__js__
+            self._js = pyt.__js__
 
         return self._js
 
@@ -198,15 +198,15 @@ class YouTube:
         stream_manifest = extract.apply_descrambler(self.streaming_data)
 
         # If the cached js doesn't work, try fetching a new js file
-        # https://github.com/pytube/pytube/issues/1054
+        # https://github.com/pyt/pyt/issues/1054
         try:
             extract.apply_signature(stream_manifest, self.vid_info, self.js)
         except exceptions.ExtractError:
             # To force an update to the js file, we clear the cache and retry
             self._js = None
             self._js_url = None
-            pytube.__js__ = None
-            pytube.__js_url__ = None
+            pyt.__js__ = None
+            pyt.__js_url__ = None
             extract.apply_signature(stream_manifest, self.vid_info, self.js)
 
         # build instances of :class:`Stream <Stream>`
@@ -350,7 +350,7 @@ class YouTube:
         raise exceptions.AgeRestrictedError(self.video_id)
 
     @property
-    def caption_tracks(self) -> List[pytube.Caption]:
+    def caption_tracks(self) -> List[pyt.Caption]:
         """Get a list of :class:`Caption <Caption>`.
 
         :rtype: List[Caption]
@@ -360,15 +360,15 @@ class YouTube:
             .get("playerCaptionsTracklistRenderer", {})
             .get("captionTracks", [])
         )
-        return [pytube.Caption(track) for track in raw_tracks]
+        return [pyt.Caption(track) for track in raw_tracks]
 
     @property
-    def captions(self) -> pytube.CaptionQuery:
+    def captions(self) -> pyt.CaptionQuery:
         """Interface to query caption tracks.
 
         :rtype: :class:`CaptionQuery <CaptionQuery>`.
         """
-        return pytube.CaptionQuery(self.caption_tracks)
+        return pyt.CaptionQuery(self.caption_tracks)
 
     @property
     def streams(self) -> StreamQuery:
@@ -430,7 +430,7 @@ class YouTube:
             raise exceptions.PytubeError(
                 (
                     f'Exception while accessing title of {self.watch_url}. '
-                    'Please file a bug report at https://github.com/pytube/pytube'
+                    'Please file a bug report at https://github.com/pyt/pyt'
                 )
             )
 

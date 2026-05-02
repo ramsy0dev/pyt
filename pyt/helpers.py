@@ -1,4 +1,4 @@
-"""Various helper functions implemented by pytube."""
+"""Various helper functions implemented by pyt."""
 import os
 import re
 import sys
@@ -19,7 +19,7 @@ from typing import (
     TypeVar
 )
 
-from pytube.exceptions import RegexMatchError
+from pyt.exceptions import RegexMatchError
 
 logger = logging.getLogger(__name__)
 
@@ -71,8 +71,8 @@ class _ColourFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         colour, abbrev = _LEVEL_FMT.get(record.levelno, ("", record.levelname[:3]))
         ts   = self.formatTime(record, "%H:%M:%S")
-        # Shorten "pytube.foo.bar" → "foo.bar" to keep lines tight
-        name = record.name.removeprefix("pytube.")
+        # Shorten "pyt.foo.bar" → "foo.bar" to keep lines tight
+        name = record.name.removeprefix("pyt.")
         msg  = record.getMessage()
 
         line = (
@@ -258,7 +258,7 @@ def safe_filename(s: str, max_length: int = 255) -> str:
 
 
 def setup_logger(level: int = logging.ERROR, log_filename: Optional[str] = None) -> None:
-    """Configure the pytube logger.
+    """Configure the pyt logger.
 
     :param int level:
         Minimum severity level to emit (e.g. logging.DEBUG).
@@ -266,7 +266,7 @@ def setup_logger(level: int = logging.ERROR, log_filename: Optional[str] = None)
         Optional path to write plain-text (no ANSI) log entries alongside the
         terminal output.
     """
-    root = logging.getLogger("pytube")
+    root = logging.getLogger("pyt")
     root.setLevel(level)
 
     # Avoid duplicate handlers if called more than once
@@ -387,18 +387,18 @@ def create_mock_html_json(vid_id) -> Dict[str, Any]:
     :return dict data
         Dict used to generate the json.gz file
     """
-    from pytube import YouTube
+    from pyt import YouTube
     gzip_filename = 'yt-video-%s-html.json.gz' % vid_id
 
-    # Get the pytube directory in order to navigate to /tests/mocks
-    pytube_dir_path = os.path.abspath(
+    # Get the pyt directory in order to navigate to /tests/mocks
+    pyt_dir_path = os.path.abspath(
         os.path.join(
             os.path.dirname(__file__),
             os.path.pardir
         )
     )
-    pytube_mocks_path = os.path.join(pytube_dir_path, 'tests', 'mocks')
-    gzip_filepath = os.path.join(pytube_mocks_path, gzip_filename)
+    pyt_mocks_path = os.path.join(pyt_dir_path, 'tests', 'mocks')
+    gzip_filepath = os.path.join(pyt_mocks_path, gzip_filename)
 
     yt = YouTube(f'https://www.youtube.com/watch?v={vid_id}')
     html_data = {

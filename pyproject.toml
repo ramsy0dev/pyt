@@ -1,5 +1,5 @@
 [tool.poetry]
-name = "pytube"
+name = "pyt"
 version = "0.15.0"
 description = "Python 3 library for downloading YouTube videos."
 authors = ["ramsy0dev <ramsy0dev@gmail.com>"]
@@ -7,7 +7,7 @@ readme = "README.md"
 license = "MIT"
 homepage = "https://github.com/ramsy0dev/pytube"
 repository = "https://github.com/ramsy0dev/pytube"
-keywords = ["youtube", "download", "video", "pytube"]
+keywords = ["youtube", "download", "video", "pyt"]
 classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
@@ -30,7 +30,7 @@ black = ">=24.4.2,<26.0.0"
 typing-extensions = "^4.12.0"
 
 [tool.poetry.plugins."console_scripts"]
-pytube = "pytube.cli:main"
+pyt = "pyt.cli:main"
 
 [build-system]
 requires = ["poetry-core"]

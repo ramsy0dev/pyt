@@ -2,9 +2,9 @@ import pytest
 
 from unittest import mock
 
-import pytube
-from pytube import YouTube
-from pytube.exceptions import RegexMatchError
+import pyt
+from pyt import YouTube
+from pyt.exceptions import RegexMatchError
 
 @mock.patch("urllib.request.install_opener")
 def test_install_proxy(opener):
@@ -16,7 +16,7 @@ def test_install_proxy(opener):
     opener.assert_called()
 
 
-@mock.patch("pytube.request.get")
+@mock.patch("pyt.request.get")
 def test_video_unavailable(get):
     get.return_value = ""
     youtube = YouTube("https://www.youtube.com/watch?v=9bZkp7q19f0")
@@ -45,10 +45,10 @@ def test_video_keywords(cipher_signature):
 
 
 def test_js_caching(cipher_signature):
-    assert pytube.__js__ is not None
-    assert pytube.__js_url__ is not None
-    assert pytube.__js__ == cipher_signature.js
-    assert pytube.__js_url__ == cipher_signature.js_url
+    assert pyt.__js__ is not None
+    assert pyt.__js_url__ is not None
+    assert pyt.__js__ == cipher_signature.js
+    assert pyt.__js_url__ == cipher_signature.js_url
 
 
 def test_channel_id(cipher_signature):

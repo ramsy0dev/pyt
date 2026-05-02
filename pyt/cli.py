@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""pytube — YouTube downloader CLI."""
+"""pyt — YouTube downloader CLI."""
 import os
 import sys
 import json
@@ -11,13 +11,13 @@ import argparse
 import subprocess  # nosec
 import time
 import datetime as dt
-import pytube.exceptions as exceptions
+import pyt.exceptions as exceptions
 
 from typing import List, Optional
 
-from pytube import __version__
-from pytube import CaptionQuery, Playlist, Stream, YouTube
-from pytube.helpers import setup_logger, safe_filename
+from pyt import __version__
+from pyt import CaptionQuery, Playlist, Stream, YouTube
+from pyt.helpers import setup_logger, safe_filename
 
 logger = logging.getLogger(__name__)
 
@@ -417,7 +417,7 @@ def _parse_args(
     parser: argparse.ArgumentParser, args: Optional[List] = None
 ) -> argparse.Namespace:
     parser.add_argument("url", nargs="?", help="YouTube watch or playlist URL")
-    parser.add_argument("--version", action="version", version=f"pytube {__version__}")
+    parser.add_argument("--version", action="version", version=f"pyt {__version__}")
     parser.add_argument("--itag", type=int, metavar="ITAG",
                         help="Download the stream with this itag")
     parser.add_argument("-r", "--resolution", metavar="RES",
@@ -479,7 +479,7 @@ def _perform_args_on_youtube(youtube: YouTube, args: argparse.Namespace) -> None
 def main() -> None:
     """YouTube downloader — download videos, audio, and captions from YouTube."""
     parser = argparse.ArgumentParser(
-        prog="pytube",
+        prog="pyt",
         description=main.__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -487,7 +487,7 @@ def main() -> None:
 
     if args.verbose:
         setup_logger(logging.DEBUG, log_filename=args.logfile)
-        logger.debug("pytube %s", __version__)
+        logger.debug("pyt %s", __version__)
 
     if not args.url or "youtu" not in args.url:
         parser.print_help()

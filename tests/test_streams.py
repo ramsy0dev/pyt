@@ -10,9 +10,9 @@ from unittest.mock import (
 )
 from urllib.error import HTTPError
 
-from pytube import request, Stream
+from pyt import request, Stream
 
-@mock.patch("pytube.streams.request")
+@mock.patch("pyt.streams.request")
 def test_stream_to_buffer(mock_request, cipher_signature):
     # Given
     stream_bytes = iter(
@@ -122,28 +122,28 @@ def test_views(cipher_signature):
 
 
 @mock.patch(
-    "pytube.request.head", MagicMock(return_value={"content-length": "6796391"})
+    "pyt.request.head", MagicMock(return_value={"content-length": "6796391"})
 )
 @mock.patch(
-    "pytube.request.stream",
+    "pyt.request.stream",
     MagicMock(return_value=iter([str(random.getrandbits(8 * 1024))])),
 )
 def test_download(cipher_signature):
-    with mock.patch("pytube.streams.open", mock.mock_open(), create=True):
+    with mock.patch("pyt.streams.open", mock.mock_open(), create=True):
         stream = cipher_signature.streams[0]
         stream.download()
 
 
 @mock.patch(
-    "pytube.request.head", MagicMock(return_value={"content-length": "16384"})
+    "pyt.request.head", MagicMock(return_value={"content-length": "16384"})
 )
 @mock.patch(
-    "pytube.request.stream",
+    "pyt.request.stream",
     MagicMock(return_value=iter([str(random.getrandbits(8 * 1024))])),
 )
-@mock.patch("pytube.streams.target_directory", MagicMock(return_value="/target"))
+@mock.patch("pyt.streams.target_directory", MagicMock(return_value="/target"))
 def test_download_with_prefix(cipher_signature):
-    with mock.patch("pytube.streams.open", mock.mock_open(), create=True):
+    with mock.patch("pyt.streams.open", mock.mock_open(), create=True):
         stream = cipher_signature.streams[0]
         file_path = stream.download(filename_prefix="prefix")
         assert file_path == os.path.join(
@@ -153,15 +153,15 @@ def test_download_with_prefix(cipher_signature):
 
 
 @mock.patch(
-    "pytube.request.head", MagicMock(return_value={"content-length": "16384"})
+    "pyt.request.head", MagicMock(return_value={"content-length": "16384"})
 )
 @mock.patch(
-    "pytube.request.stream",
+    "pyt.request.stream",
     MagicMock(return_value=iter([str(random.getrandbits(8 * 1024))])),
 )
-@mock.patch("pytube.streams.target_directory", MagicMock(return_value="/target"))
+@mock.patch("pyt.streams.target_directory", MagicMock(return_value="/target"))
 def test_download_with_filename(cipher_signature):
-    with mock.patch("pytube.streams.open", mock.mock_open(), create=True):
+    with mock.patch("pyt.streams.open", mock.mock_open(), create=True):
         stream = cipher_signature.streams[0]
         file_path = stream.download(filename="cool name bro")
         assert file_path == os.path.join(
@@ -171,16 +171,16 @@ def test_download_with_filename(cipher_signature):
 
 
 @mock.patch(
-    "pytube.request.head", MagicMock(return_value={"content-length": "16384"})
+    "pyt.request.head", MagicMock(return_value={"content-length": "16384"})
 )
 @mock.patch(
-    "pytube.request.stream",
+    "pyt.request.stream",
     MagicMock(return_value=iter([str(random.getrandbits(8 * 1024))])),
 )
-@mock.patch("pytube.streams.target_directory", MagicMock(return_value="/target"))
+@mock.patch("pyt.streams.target_directory", MagicMock(return_value="/target"))
 @mock.patch("os.path.isfile", MagicMock(return_value=True))
 def test_download_with_existing(cipher_signature):
-    with mock.patch("pytube.streams.open", mock.mock_open(), create=True):
+    with mock.patch("pyt.streams.open", mock.mock_open(), create=True):
         stream = cipher_signature.streams[0]
         os.path.getsize = Mock(return_value=stream.filesize)
         file_path = stream.download()
@@ -192,16 +192,16 @@ def test_download_with_existing(cipher_signature):
 
 
 @mock.patch(
-    "pytube.request.head", MagicMock(return_value={"content-length": "16384"})
+    "pyt.request.head", MagicMock(return_value={"content-length": "16384"})
 )
 @mock.patch(
-    "pytube.request.stream",
+    "pyt.request.stream",
     MagicMock(return_value=iter([str(random.getrandbits(8 * 1024))])),
 )
-@mock.patch("pytube.streams.target_directory", MagicMock(return_value="/target"))
+@mock.patch("pyt.streams.target_directory", MagicMock(return_value="/target"))
 @mock.patch("os.path.isfile", MagicMock(return_value=True))
 def test_download_with_existing_no_skip(cipher_signature):
-    with mock.patch("pytube.streams.open", mock.mock_open(), create=True):
+    with mock.patch("pyt.streams.open", mock.mock_open(), create=True):
         stream = cipher_signature.streams[0]
         os.path.getsize = Mock(return_value=stream.filesize)
         file_path = stream.download(skip_existing=False)
@@ -223,17 +223,17 @@ def test_progressive_streams_return_includes_video_track(cipher_signature):
 
 
 @mock.patch(
-    "pytube.request.head", MagicMock(return_value={"content-length": "16384"})
+    "pyt.request.head", MagicMock(return_value={"content-length": "16384"})
 )
 @mock.patch(
-    "pytube.request.stream",
+    "pyt.request.stream",
     MagicMock(return_value=iter([str(random.getrandbits(8 * 1024))])),
 )
 def test_on_progress_hook(cipher_signature):
     callback_fn = mock.MagicMock()
     cipher_signature.register_on_progress_callback(callback_fn)
 
-    with mock.patch("pytube.streams.open", mock.mock_open(), create=True):
+    with mock.patch("pyt.streams.open", mock.mock_open(), create=True):
         stream = cipher_signature.streams[0]
         stream.download()
     assert callback_fn.called
@@ -244,17 +244,17 @@ def test_on_progress_hook(cipher_signature):
 
 
 @mock.patch(
-    "pytube.request.head", MagicMock(return_value={"content-length": "16384"})
+    "pyt.request.head", MagicMock(return_value={"content-length": "16384"})
 )
 @mock.patch(
-    "pytube.request.stream",
+    "pyt.request.stream",
     MagicMock(return_value=iter([str(random.getrandbits(8 * 1024))])),
 )
 def test_on_complete_hook(cipher_signature):
     callback_fn = mock.MagicMock()
     cipher_signature.register_on_complete_callback(callback_fn)
 
-    with mock.patch("pytube.streams.open", mock.mock_open(), create=True):
+    with mock.patch("pyt.streams.open", mock.mock_open(), create=True):
         stream = cipher_signature.streams[0]
         stream.download()
     assert callback_fn.called
@@ -314,8 +314,8 @@ def test_repr_for_adaptive_streams(cipher_signature):
 
 def test_segmented_stream_on_404(cipher_signature):
     stream = cipher_signature.streams.filter(adaptive=True)[0]
-    with mock.patch('pytube.request.head') as mock_head:
-        with mock.patch('pytube.request.urlopen') as mock_url_open:
+    with mock.patch('pyt.request.head') as mock_head:
+        with mock.patch('pyt.request.urlopen') as mock_url_open:
             # Mock the responses to YouTube
             mock_url_open_object = mock.Mock()
 
@@ -383,8 +383,8 @@ def test_segmented_stream_on_404(cipher_signature):
 
 def test_segmented_only_catches_404(cipher_signature):
     stream = cipher_signature.streams.filter(adaptive=True)[0]
-    with mock.patch('pytube.request.stream') as mock_stream:
+    with mock.patch('pyt.request.stream') as mock_stream:
         mock_stream.side_effect = HTTPError('', 403, 'Forbidden', '', '')
-        with mock.patch("pytube.streams.open", mock.mock_open(), create=True):
+        with mock.patch("pyt.streams.open", mock.mock_open(), create=True):
             with pytest.raises(HTTPError):
                 stream.download()

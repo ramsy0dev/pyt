@@ -10,8 +10,8 @@ from typing import (
     Optional
 )
 
-from pytube import request
-from pytube.helpers import (
+from pyt import request
+from pyt.helpers import (
     safe_filename,
     target_directory
 )
@@ -61,7 +61,7 @@ class Caption:
     def generate_srt_captions(self) -> str:
         """Generate "SubRip Subtitle" captions.
 
-        Takes the xml captions from :meth:`~pytube.Caption.xml_captions` and
+        Takes the xml captions from :meth:`~pyt.Caption.xml_captions` and
         recompiles them into the "SubRip Subtitle" format.
         """
         return self.xml_caption_to_srt(self.xml_captions)

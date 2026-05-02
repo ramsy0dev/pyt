@@ -8,7 +8,7 @@ from unittest.mock import (
 )
 
 import pytest
-from pytube import (
+from pyt import (
     Caption,
     CaptionQuery,
     captions
@@ -60,7 +60,7 @@ def test_caption_query_get_by_language_code_when_not_exists():
         # assert not_found is not None  # should never reach here
 
 
-@mock.patch("pytube.captions.Caption.generate_srt_captions")
+@mock.patch("pyt.captions.Caption.generate_srt_captions")
 def test_download(srt):
     open_mock = mock_open()
     with patch("builtins.open", open_mock):
@@ -79,7 +79,7 @@ def test_download(srt):
         )
 
 
-@mock.patch("pytube.captions.Caption.generate_srt_captions")
+@mock.patch("pyt.captions.Caption.generate_srt_captions")
 def test_download_with_prefix(srt):
     open_mock = mock_open()
     with patch("builtins.open", open_mock):
@@ -99,7 +99,7 @@ def test_download_with_prefix(srt):
         )
 
 
-@mock.patch("pytube.captions.Caption.generate_srt_captions")
+@mock.patch("pyt.captions.Caption.generate_srt_captions")
 def test_download_with_output_path(srt):
     open_mock = mock_open()
     captions.target_directory = MagicMock(return_value="/target")
@@ -118,7 +118,7 @@ def test_download_with_output_path(srt):
         captions.target_directory.assert_called_with("blah")
 
 
-@mock.patch("pytube.captions.Caption.xml_captions")
+@mock.patch("pyt.captions.Caption.xml_captions")
 def test_download_xml_and_trim_extension(xml):
     open_mock = mock_open()
     with patch("builtins.open", open_mock):
@@ -147,7 +147,7 @@ def test_repr():
     assert repr(caption_query) == '{\'en\': <Caption lang="name1" code="en">}'
 
 
-@mock.patch("pytube.request.get")
+@mock.patch("pyt.request.get")
 def test_xml_captions(request_get):
     request_get.return_value = "test"
     caption = Caption(
@@ -156,7 +156,7 @@ def test_xml_captions(request_get):
     assert caption.xml_captions == "test"
 
 
-@mock.patch("pytube.captions.request")
+@mock.patch("pyt.captions.request")
 def test_generate_srt_captions(request):
     request.get.return_value = (
         '<?xml version="1.0" encoding="utf-8" ?><transcript><text start="6.5" dur="1.7">['

@@ -1,5 +1,5 @@
 """Unit tests for the :module:`metadata <metadata>` module."""
-from pytube import extract
+from pyt import extract
 
 def test_extract_metadata_empty():
     ytmd = extract.metadata({})

@@ -16,12 +16,12 @@ from typing import (
     Union
 )
 
-from pytube import (
+from pyt import (
     extract,
     request,
     YouTube
 )
-from pytube.helpers import (
+from pyt.helpers import (
     cache,
     DeferredGeneratorList,
     install_proxy,
@@ -340,7 +340,7 @@ class Playlist(Sequence):
 
         For some playlists, this will be a specific date, which is returned as a datetime
         object. For other playlists, this is an estimate such as "1 week ago". Due to the
-        fact that this value is returned as a string, pytube does a best-effort parsing
+        fact that this value is returned as a string, pyt does a best-effort parsing
         where possible, and returns the raw string where it is not possible.
 
         :return: Date of last playlist update where possible, else the string provided

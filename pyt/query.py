@@ -11,11 +11,11 @@ from collections.abc import (
     Sequence
 )
 
-from pytube import (
+from pyt import (
     Caption,
     Stream
 )
-from pytube.helpers import deprecated
+from pyt.helpers import deprecated
 
 class StreamQuery(Sequence):
     """Interface for querying the available media streams."""

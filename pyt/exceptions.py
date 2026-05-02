@@ -5,7 +5,7 @@ from typing import (
 )
 
 class PytubeError(Exception):
-    """Base pytube exception that all others inherit.
+    """Base pyt exception that all others inherit.
 
     This is done to not pollute the built-in exceptions, which *could* result
     in unintended errors being unexpectedly and incorrectly handled within

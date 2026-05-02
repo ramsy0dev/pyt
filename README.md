@@ -1,4 +1,8 @@
-# pytube
+```
+┌─────────────────────────────────────────┐
+│  pyt  ·  youtube downloader for python  │
+└─────────────────────────────────────────┘
+```
 
 [![CI](https://github.com/ramsy0dev/pytube/actions/workflows/ci.yml/badge.svg)](https://github.com/ramsy0dev/pytube/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://python.org)
@@ -40,7 +44,7 @@ pip install git+https://github.com/ramsy0dev/pytube
 ## Quick start
 
 ```python
-from pytube import YouTube
+from pyt import YouTube
 
 yt = YouTube("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
 print(yt.title)   # Rick Astley - Never Gonna Give You Up
@@ -70,34 +74,34 @@ yt.streams.get_highest_resolution().download()
 
 ```bash
 # download best quality
-pytube https://www.youtube.com/watch?v=dQw4w9WgXcQ
+pyt https://www.youtube.com/watch?v=dQw4w9WgXcQ
 
 # list all streams
-pytube https://www.youtube.com/watch?v=dQw4w9WgXcQ --list
+pyt https://www.youtube.com/watch?v=dQw4w9WgXcQ --list
 
 # pick by itag
-pytube https://www.youtube.com/watch?v=dQw4w9WgXcQ --itag=137
+pyt https://www.youtube.com/watch?v=dQw4w9WgXcQ --itag=137
 
 # specific resolution
-pytube https://www.youtube.com/watch?v=dQw4w9WgXcQ -r 720p
+pyt https://www.youtube.com/watch?v=dQw4w9WgXcQ -r 720p
 
 # audio only (default mp4, pass format to override)
-pytube https://www.youtube.com/watch?v=dQw4w9WgXcQ -a
-pytube https://www.youtube.com/watch?v=dQw4w9WgXcQ -a webm
+pyt https://www.youtube.com/watch?v=dQw4w9WgXcQ -a
+pyt https://www.youtube.com/watch?v=dQw4w9WgXcQ -a webm
 
 # merge best video + audio with ffmpeg
-pytube https://www.youtube.com/watch?v=dQw4w9WgXcQ -f
-pytube https://www.youtube.com/watch?v=dQw4w9WgXcQ -f 1080p
+pyt https://www.youtube.com/watch?v=dQw4w9WgXcQ -f
+pyt https://www.youtube.com/watch?v=dQw4w9WgXcQ -f 1080p
 
 # save to a specific folder
-pytube https://www.youtube.com/watch?v=dQw4w9WgXcQ -t ~/Downloads
+pyt https://www.youtube.com/watch?v=dQw4w9WgXcQ -t ~/Downloads
 
 # captions
-pytube https://www.youtube.com/watch?v=dQw4w9WgXcQ --list-captions
-pytube https://www.youtube.com/watch?v=dQw4w9WgXcQ -c en
+pyt https://www.youtube.com/watch?v=dQw4w9WgXcQ --list-captions
+pyt https://www.youtube.com/watch?v=dQw4w9WgXcQ -c en
 
 # download a playlist
-pytube https://www.youtube.com/playlist?list=PLxxxxxxxx
+pyt https://www.youtube.com/playlist?list=PLxxxxxxxx
 ```
 
 ---
@@ -105,7 +109,7 @@ pytube https://www.youtube.com/playlist?list=PLxxxxxxxx
 ## Playlists and channels
 
 ```python
-from pytube import Playlist
+from pyt import Playlist
 
 p = Playlist("https://www.youtube.com/playlist?list=PLxxxxxxxx")
 print(p.title)
