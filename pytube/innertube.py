@@ -46,16 +46,16 @@ _default_clients = {
         'context': {
             'client': {
                 'clientName': 'ANDROID',
-                'clientVersion': '19.44.37',
+                'clientVersion': '21.16.7',
                 'androidSdkVersion': 34,
                 'hl': 'en',
-                'userAgent': 'com.google.android.youtube/19.44.37 (Linux; U; Android 14; en_US; Pixel 7; Build/UQ1A.240205.004; Cronet/113.0.5672.24)',
+                'userAgent': 'com.google.android.youtube/21.16.7 (Linux; U; Android 14; en_US; Pixel 8; Build/UQ1A.240205.004; Cronet/113.0.5672.24)',
             }
         },
         'header': {
-            'User-Agent': 'com.google.android.youtube/19.44.37 (Linux; U; Android 14; en_US; Pixel 7; Build/UQ1A.240205.004; Cronet/113.0.5672.24)',
+            'User-Agent': 'com.google.android.youtube/21.16.7 (Linux; U; Android 14; en_US; Pixel 8; Build/UQ1A.240205.004; Cronet/113.0.5672.24)',
             'X-Youtube-Client-Name': '3',
-            'X-Youtube-Client-Version': '19.44.37',
+            'X-Youtube-Client-Version': '21.16.7',
         },
         'api_key': 'AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8'
     },
@@ -95,16 +95,16 @@ _default_clients = {
         'context': {
             'client': {
                 'clientName': 'ANDROID_EMBEDDED_PLAYER',
-                'clientVersion': '19.44.37',
+                'clientVersion': '21.16.7',
                 'clientScreen': 'EMBED',
                 'androidSdkVersion': 34,
                 'hl': 'en',
             }
         },
         'header': {
-            'User-Agent': 'com.google.android.youtube/19.44.37 (Linux; U; Android 14; en_US; Pixel 7; Build/UQ1A.240205.004; Cronet/113.0.5672.24)',
+            'User-Agent': 'com.google.android.youtube/21.16.7 (Linux; U; Android 14; en_US; Pixel 8; Build/UQ1A.240205.004; Cronet/113.0.5672.24)',
             'X-Youtube-Client-Name': '55',
-            'X-Youtube-Client-Version': '19.44.37',
+            'X-Youtube-Client-Version': '21.16.7',
         },
         'api_key': 'AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8'
     },
@@ -382,18 +382,20 @@ class InnerTube:
     def base_params(self):
         """Return the base query parameters to transmit to the innertube API."""
         return {
-            'key': self.api_key,
+            'prettyPrint': False,
+        }
+
+    @property
+    def base_body(self):
+        """Return base fields merged into POST body for innertube requests."""
+        return {
             'contentCheckOk': True,
-            'racyCheckOk': True
+            'racyCheckOk': True,
         }
 
     def _call_api(self, endpoint, query, data):
         """Make a request to a given endpoint with the provided query parameters and data."""
-        # Remove the API key if oauth is being used.
-        if self.use_oauth:
-            del query['key']
-
-        endpoint_url = f'{endpoint}?{parse.urlencode(query)}'
+        endpoint_url = f'{endpoint}?{parse.urlencode(query)}' if query else endpoint
         headers = {
             'Content-Type': 'application/json',
         }
@@ -452,21 +454,30 @@ class InnerTube:
         ...
         # return self._call_api(endpoint, query, self.base_data)  # noqa:E800
 
-    def player(self, video_id):
+    def player(self, video_id, visitor_data=None):
         """Make a request to the player endpoint.
 
         :param str video_id:
             The video id to get player info for.
+        :param str visitor_data:
+            Optional visitorData token extracted from the watch page, used to
+            satisfy YouTube's precondition checks on mobile clients.
         :rtype: dict
         :returns:
             Raw player info results.
         """
         endpoint = f'{self.base_url}/player'
-        query = {
+        data = {
             'videoId': video_id,
         }
-        query.update(self.base_params)
-        return self._call_api(endpoint, query, self.base_data)
+        data.update(self.base_body)
+        context = dict(self.base_data)
+        if visitor_data:
+            context['context'] = dict(context.get('context', {}))
+            context['context']['client'] = dict(context['context'].get('client', {}))
+            context['context']['client']['visitorData'] = visitor_data
+        data.update(context)
+        return self._call_api(endpoint, self.base_params, data)
 
     def search(self, search_query, continuation=None):
         """Make a request to the search endpoint.
@@ -478,15 +489,14 @@ class InnerTube:
             Raw search query results.
         """
         endpoint = f'{self.base_url}/search'
-        query = {
-            'query': search_query
+        data = {
+            'query': search_query,
         }
-        query.update(self.base_params)
-        data = {}
         if continuation:
             data['continuation'] = continuation
+        data.update(self.base_body)
         data.update(self.base_data)
-        return self._call_api(endpoint, query, data)
+        return self._call_api(endpoint, self.base_params, data)
 
     def verify_age(self, video_id):
         """Make a request to the age_verify endpoint.
@@ -520,9 +530,9 @@ class InnerTube:
         This is likely related to captioning for videos, but is currently untested.
         """
         endpoint = f'{self.base_url}/get_transcript'
-        query = {
+        data = {
             'videoId': video_id,
         }
-        query.update(self.base_params)
-        result = self._call_api(endpoint, query, self.base_data)
+        data.update(self.base_data)
+        result = self._call_api(endpoint, self.base_params, data)
         return result
