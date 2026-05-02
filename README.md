@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="images/pyt-logo.svg" alt="pyt" width="340"/>
+  <img src="images/pyt-logo.svg" alt="pyt" width="120"/>
 </p>
 
 [![CI](https://github.com/ramsy0dev/pytube/actions/workflows/ci.yml/badge.svg)](https://github.com/ramsy0dev/pytube/actions/workflows/ci.yml)
