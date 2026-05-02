@@ -38,6 +38,9 @@ logger = logging.getLogger(__name__)
 # TV_EMBED provides a fallback for restricted content that slips past the others.
 _PLAYER_CLIENT_PRIORITY = ['ANDROID', 'IOS', 'TV_EMBED']
 
+# Web-based clients whose version string can be updated from the live page.
+_WEB_CLIENTS = {'WEB', 'WEB_EMBED', 'WEB_MUSIC', 'WEB_CREATOR', 'MWEB', 'TV_EMBED'}
+
 
 class YouTube:
     """Core developer interface for pytube."""
@@ -287,6 +290,9 @@ class YouTube:
             return self._vid_info
 
         visitor_data = self._visitor_data
+        # Read the live WEB client version once; passed to web-type clients so
+        # they use the current deploy version instead of the hardcoded one.
+        web_version = extract.web_client_version(self.watch_html)
         first_response = None
 
         for client in _PLAYER_CLIENT_PRIORITY:
@@ -295,6 +301,7 @@ class YouTube:
                     client,
                     use_oauth=self.use_oauth,
                     allow_cache=self.allow_oauth_cache,
+                    client_version=web_version if client in _WEB_CLIENTS else None,
                 )
                 response = innertube.player(
                     self.video_id,

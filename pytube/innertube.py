@@ -241,21 +241,28 @@ _token_file = os.path.join(_cache_dir, 'tokens.json')
 
 class InnerTube:
     """Object for interacting with the innertube API."""
-    def __init__(self, client='ANDROID', use_oauth=False, allow_cache=True):
+    def __init__(self, client='ANDROID', use_oauth=False, allow_cache=True, client_version=None):
         """Initialize an InnerTube object.
 
         :param str client:
             Client to use for the object.
-            Default to web because it returns the most playback types.
         :param bool use_oauth:
             Whether or not to authenticate to YouTube.
         :param bool allow_cache:
             Allows caching of oauth tokens on the machine.
+        :param str client_version:
+            Optional version string to override the hardcoded client version.
+            Useful for web-based clients whose version can be read from the page.
         """
         self.client_name = client
         self.context = _default_clients[client]['context']
         self.header = _default_clients[client]['header']
         self.api_key = _default_clients[client]['api_key']
+
+        if client_version:
+            import copy
+            self.context = copy.deepcopy(self.context)
+            self.context['client']['clientVersion'] = client_version
         self.access_token = None
         self.refresh_token = None
         self.use_oauth = use_oauth
