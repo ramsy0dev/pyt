@@ -454,7 +454,11 @@ def _perform_args_on_youtube(youtube: YouTube, args: argparse.Namespace) -> None
     _show_video_info(youtube)
 
     if no_action:
-        download_highest_resolution_progressive(youtube=youtube, target=args.target)
+        if shutil.which("ffmpeg"):
+            ffmpeg_process(youtube=youtube, resolution="best", target=args.target)
+        else:
+            _print_warn("ffmpeg not found — falling back to best progressive stream (max 720p)")
+            download_highest_resolution_progressive(youtube=youtube, target=args.target)
         return
 
     if args.list:
