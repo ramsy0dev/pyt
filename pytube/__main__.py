@@ -7,6 +7,7 @@ smaller peripheral modules and functions.
 
 """
 import logging
+import re
 import pytube
 import pytube.exceptions as exceptions
 
@@ -201,8 +202,10 @@ class YouTube:
             extract.apply_signature(stream_manifest, self.vid_info, self.js)
 
         # build instances of :class:`Stream <Stream>`
-        # Initialize stream objects
+        # OTF (on-the-fly) streams have no direct URL and are skipped.
         for stream in stream_manifest:
+            if 'url' not in stream:
+                continue
             video = Stream(
                 stream=stream,
                 monostate=self.stream_monostate,
@@ -246,18 +249,72 @@ class YouTube:
                 raise exceptions.LiveStreamError(video_id=self.video_id)
     
     @property
+    def _visitor_data(self) -> Optional[str]:
+        """Extract visitorData from the watch page for use in innertube requests."""
+        try:
+            match = re.search(r'"visitorData"\s*:\s*"([^"]+)"', self.watch_html)
+            return match.group(1) if match else None
+        except Exception:
+            return None
+
+    @property
     def vid_info(self):
         """Parse the raw vid info and return the parsed result.
+
+        Tries the ANDROID innertube client first (returns all adaptive streams
+        with direct URLs). If that returns no usable streams, falls back to the
+        ytInitialPlayerResponse embedded in the watch page HTML (gives at least
+        progressive streams without needing current client versions). Age-
+        restricted videos skip straight to the innertube path.
 
         :rtype: Dict[Any, Any]
         """
         if self._vid_info:
             return self._vid_info
 
-        innertube = InnerTube(use_oauth=self.use_oauth, allow_cache=self.allow_oauth_cache)
+        innertube_response = None
 
-        innertube_response = innertube.player(self.video_id)
-        self._vid_info = innertube_response
+        if not self.age_restricted:
+            # Primary: ANDROID innertube (pre-signed URLs, all adaptive formats).
+            try:
+                innertube = InnerTube(
+                    use_oauth=self.use_oauth,
+                    allow_cache=self.allow_oauth_cache
+                )
+                innertube_response = innertube.player(
+                    self.video_id,
+                    visitor_data=self._visitor_data
+                )
+                status = innertube_response.get('playabilityStatus', {}).get('status')
+                if status == 'OK' and 'streamingData' in innertube_response:
+                    self._vid_info = innertube_response
+                    return self._vid_info
+            except Exception:
+                pass
+
+            # Fallback: ytInitialPlayerResponse from the watch page HTML.
+            try:
+                player_response = extract.initial_player_response(self.watch_html)
+                status = player_response.get('playabilityStatus', {}).get('status')
+                if status == 'OK' and 'streamingData' in player_response:
+                    self._vid_info = player_response
+                    return self._vid_info
+            except exceptions.RegexMatchError:
+                pass
+
+        # Use whatever innertube returned (may have no streams), or make a
+        # fresh call for age-restricted content that skipped the block above.
+        if innertube_response is not None:
+            self._vid_info = innertube_response
+        else:
+            innertube = InnerTube(
+                use_oauth=self.use_oauth,
+                allow_cache=self.allow_oauth_cache
+            )
+            self._vid_info = innertube.player(
+                self.video_id,
+                visitor_data=self._visitor_data
+            )
         return self._vid_info
 
     def bypass_age_gate(self):

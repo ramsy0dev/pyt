@@ -424,7 +424,7 @@ def apply_signature(stream_manifest: Dict, vid_info: Dict, js: str) -> None:
         The contents of the base.js asset file.
 
     """
-    cipher = Cipher(js=js)
+    cipher = None  # created lazily — only when a stream actually needs deciphering
 
     for i, stream in enumerate(stream_manifest):
         try:
@@ -436,15 +436,13 @@ def apply_signature(stream_manifest: Dict, vid_info: Dict, js: str) -> None:
             )
             if live_stream:
                 raise LiveStreamError("UNKNOWN")
-        # 403 Forbidden fix.
-        if "signature" in url or (
-            "s" not in stream and ("&sig=" in url or "&lsig=" in url)
-        ):
-            # For certain videos, YouTube will just provide them pre-signed, in
-            # which case there's no real magic to download them and we can skip
-            # the whole signature descrambling entirely.
-            logger.debug("signature found, skip decipher")
+        # Skip streams that are already signed or don't carry a cipher.
+        if "s" not in stream:
+            logger.debug("no ciphered signature, skip decipher")
             continue
+
+        if cipher is None:
+            cipher = Cipher(js=js)
 
         signature = cipher.get_signature(ciphered_signature=stream["s"])
 
