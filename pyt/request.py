@@ -162,8 +162,9 @@ def stream(
             # Try to execute the request, ignoring socket timeouts
             try:
                 response = _execute_request(
-                    url + f"&range={downloaded}-{stop_pos}",
+                    url,
                     method="GET",
+                    headers={"Range": f"bytes={downloaded}-{stop_pos}"},
                     timeout=timeout
                 )
             except URLError as e:
@@ -185,10 +186,9 @@ def stream(
             try:
                 content_range = response.info().get("Content-Range", "")
                 if content_range:
+                    # "bytes 0-9437183/263700000" → 263700000
                     file_size = int(content_range.split("/")[-1])
-                else:
-                    file_size = int(response.info().get("Content-Length", default_range_size))
-            except (KeyError, IndexError, ValueError, TypeError) as e:
+            except (IndexError, ValueError, TypeError) as e:
                 logger.error(e)
         while True:
             chunk = response.read()
