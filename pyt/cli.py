@@ -648,93 +648,119 @@ def _sleep_between(args) -> None:
     time.sleep(delay)
 
 
+# ── Help ─────────────────────────────────────────────────────────────────────
+
+def _print_help() -> None:
+    W = shutil.get_terminal_size().columns
+    rule = f"{DM}{'-' * min(W - 2, 72)}{R}"
+
+    def sec(title: str) -> None:
+        sys.stdout.write(f"\n  {B}{BCY}{title}{R}\n")
+
+    def row(flags: str, desc: str, note: str = "") -> None:
+        col = 32
+        note_str = f"  {DM}{note}{R}" if note else ""
+        sys.stdout.write(f"    {GR}{flags:<{col}}{R}{desc}{note_str}\n")
+
+    def gap() -> None:
+        sys.stdout.write("\n")
+
+    sys.stdout.write(f"\n  {B}{BWH}pyt{R}  {DM}{__version__}{R}\n")
+    sys.stdout.write(f"  {DM}A maintained pytube fork.{R}\n\n")
+    sys.stdout.write(f"  {rule}\n")
+    sys.stdout.write(f"  {B}Usage{R}  pyt <url> [options]\n")
+    sys.stdout.write(f"         pyt --batch-file urls.txt [options]\n")
+    sys.stdout.write(f"  {rule}\n")
+
+    sec("What to download")
+    row("(default)", "Best quality, merged with ffmpeg when available")
+    row("-f, --ffmpeg [RES]", "Merge best video + audio via ffmpeg", "default: best")
+    row("-r RES", "Specific resolution  e.g. 720p, 1080p")
+    row("-a [FMT]", "Audio-only stream", "default format: mp4")
+    row("--itag N", "Pick a stream by itag number")
+    row("-l", "List all available streams and exit")
+
+    sec("After download")
+    row("-x", "Extract audio track", "needs ffmpeg")
+    row("--audio-format FMT", "mp3  m4a  aac  flac  opus  vorbis  wav  alac", "default: mp3")
+    row("--embed-metadata", "Write title, artist, date into the file", "needs ffmpeg")
+    row("--embed-thumbnail", "Attach cover art", "needs ffmpeg")
+    row("--embed-subs", "Mux subtitle track in  (pair with -c)", "needs ffmpeg")
+    row("--sponsorblock-mark CATS", "Add SponsorBlock chapter markers")
+    row("--sponsorblock-remove CATS", "Cut SponsorBlock segments out  (re-encodes)")
+    sys.stdout.write(f"    {DM}categories: sponsor intro outro selfpromo preview filler interaction music_offtopic hook  / all{R}\n")
+
+    sec("Subtitles & captions")
+    row("-c LANG", "Download or embed captions  e.g. en, fr, de")
+    row("--list-captions", "Show all available caption languages")
+
+    sec("Save as")
+    row("-t DIR", "Output directory", "default: current dir")
+    row("-o TEMPLATE", "Filename template")
+    sys.stdout.write(f"    {DM}e.g.  {{author}}/{{upload_date:%Y-%m-%d}} - {{title}}.{{ext}}{R}\n")
+    sys.stdout.write(f"    {DM}fields: title  id  author  channel_id  upload_date  ext  resolution  fps  abr  filesize  playlist_index  playlist_title{R}\n")
+    row("-j", "Print video info as JSON, skip download")
+
+    sec("Connection")
+    row("--proxy URL", "socks5://host:port  or  http://user:pass@host:port")
+    row("--cookies FILE", "Netscape cookie file")
+    row("--cookies-from-browser B", "Pull cookies from  chrome  firefox  brave  edge  safari")
+    row("--geo-bypass", "Spoof X-Forwarded-For header")
+    row("--geo-bypass-country CC", "Specific country code  e.g. US, DE")
+
+    sec("Multiple videos")
+    row("--batch-file FILE", "Download every URL in FILE  (one per line, # = comment)")
+    row("--download-archive FILE", "Skip IDs already in FILE; append new ones")
+    row("--sleep-interval N", "Wait N seconds between downloads")
+    row("--max-sleep-interval N", "Random wait between N and max-N seconds")
+
+    sec("Misc")
+    row("-v, --verbose", "Debug logging")
+    row("--logfile FILE", "Write log to file instead of stderr")
+    row("--build-playback-report", "Dump raw page data for bug reports")
+    row("--version", "Print version and exit")
+
+    gap()
+    sys.stdout.write(f"  {DM}Config file:  ~/.pyt.conf  or  ./pyt.conf  (INI, [default] section){R}\n")
+    gap()
+
+
 # ── Argument parsing ──────────────────────────────────────────────────────────
 
 def _parse_args(
     parser: argparse.ArgumentParser, args: Optional[List] = None
 ) -> argparse.Namespace:
-    # ── positional & version ─────────────────────────────────────────────────
-    parser.add_argument("url", nargs="?", help="YouTube watch or playlist URL")
+    parser.add_argument("url", nargs="?")
     parser.add_argument("--version", action="version", version=f"pyt {__version__}")
-
-    # ── stream selection ──────────────────────────────────────────────────────
-    sel = parser.add_argument_group("stream selection")
-    sel.add_argument("--itag", type=int, metavar="ITAG",
-                     help="Download the stream with this itag")
-    sel.add_argument("-r", "--resolution", metavar="RES",
-                     help="Download the stream at this resolution (e.g. 1080p)")
-    sel.add_argument("-l", "--list", action="store_true",
-                     help="List all available streams")
-    sel.add_argument("-a", "--audio", const="mp4", nargs="?", metavar="FMT",
-                     help="Download audio only (default format: mp4)")
-    sel.add_argument("-f", "--ffmpeg", const="best", nargs="?", metavar="RES",
-                     help="Download video+audio separately and merge with ffmpeg")
-
-    # ── post-processing ───────────────────────────────────────────────────────
-    pp = parser.add_argument_group("post-processing")
-    pp.add_argument("-x", "--extract-audio", action="store_true",
-                    help="Extract audio after download (requires ffmpeg)")
-    pp.add_argument("--audio-format", metavar="FMT", default="mp3",
-                    help="Audio format for -x (mp3, m4a, aac, flac, opus, vorbis, wav, alac). Default: mp3")
-    pp.add_argument("--embed-metadata", action="store_true",
-                    help="Embed title, artist, date into the file (requires ffmpeg)")
-    pp.add_argument("--embed-thumbnail", action="store_true",
-                    help="Embed video thumbnail as cover art (requires ffmpeg)")
-    pp.add_argument("--embed-subs", action="store_true",
-                    help="Embed subtitles into video (use with -c; requires ffmpeg)")
-    pp.add_argument("--sponsorblock-mark", metavar="CATS",
-                    help='Mark SponsorBlock segments as chapters (e.g. "sponsor,intro" or "all")')
-    pp.add_argument("--sponsorblock-remove", metavar="CATS",
-                    help='Remove SponsorBlock segments (re-encodes video; e.g. "sponsor" or "all")')
-
-    # ── captions ─────────────────────────────────────────────────────────────
-    cap = parser.add_argument_group("captions")
-    cap.add_argument("-c", "--caption-code", metavar="LANG",
-                     help="Download captions for the given language code (e.g. en)")
-    cap.add_argument("-lc", "--list-captions", action="store_true",
-                     help="List available caption language codes")
-
-    # ── output ────────────────────────────────────────────────────────────────
-    out = parser.add_argument_group("output")
-    out.add_argument("-t", "--target", metavar="DIR",
-                     help="Output directory (default: current directory)")
-    out.add_argument("-o", "--output", metavar="TEMPLATE",
-                     help='Output filename template (e.g. "{title}.{ext}" or "{author}/{title}.{ext}"). Default: {title}.{ext}')
-    out.add_argument("-j", "--dump-json", action="store_true",
-                     help="Print video info as JSON without downloading")
-
-    # ── network ───────────────────────────────────────────────────────────────
-    net = parser.add_argument_group("network")
-    net.add_argument("--proxy", metavar="URL",
-                     help="Proxy URL (e.g. socks5://127.0.0.1:9050 or http://user:pass@host:port)")
-    net.add_argument("--cookies", metavar="FILE",
-                     help="Load cookies from a Netscape format file")
-    net.add_argument("--cookies-from-browser", metavar="BROWSER",
-                     help="Extract cookies from browser (chrome, firefox, brave, edge, safari)")
-    net.add_argument("--geo-bypass", action="store_true",
-                     help="Bypass geographic restrictions via a fake X-Forwarded-For header")
-    net.add_argument("--geo-bypass-country", metavar="CC",
-                     help="Two-letter country code for geo-bypass (e.g. US)")
-    net.add_argument("--sleep-interval", metavar="N", type=float,
-                     help="Sleep N seconds between downloads in batch/playlist mode")
-    net.add_argument("--max-sleep-interval", metavar="N", type=float,
-                     help="Max sleep (random interval between --sleep-interval and this)")
-
-    # ── batch ─────────────────────────────────────────────────────────────────
-    bat = parser.add_argument_group("batch")
-    bat.add_argument("--batch-file", metavar="FILE",
-                     help="Read URLs from FILE (one per line; # lines are comments)")
-    bat.add_argument("--download-archive", metavar="FILE",
-                     help="Skip already-downloaded videos; record new downloads to FILE")
-
-    # ── debug ─────────────────────────────────────────────────────────────────
-    dbg = parser.add_argument_group("debug")
-    dbg.add_argument("-v", "--verbose", action="store_true",
-                     help="Enable debug logging")
-    dbg.add_argument("--logfile", metavar="FILE",
-                     help="Write log output to this file")
-    dbg.add_argument("--build-playback-report", action="store_true",
-                     help="Save raw HTML/JS/vid-info to a gzip report for debugging")
+    parser.add_argument("--itag", type=int, metavar="ITAG")
+    parser.add_argument("-r", "--resolution", metavar="RES")
+    parser.add_argument("-l", "--list", action="store_true")
+    parser.add_argument("-a", "--audio", const="mp4", nargs="?", metavar="FMT")
+    parser.add_argument("-f", "--ffmpeg", const="best", nargs="?", metavar="RES")
+    parser.add_argument("-x", "--extract-audio", action="store_true")
+    parser.add_argument("--audio-format", metavar="FMT", default="mp3")
+    parser.add_argument("--embed-metadata", action="store_true")
+    parser.add_argument("--embed-thumbnail", action="store_true")
+    parser.add_argument("--embed-subs", action="store_true")
+    parser.add_argument("--sponsorblock-mark", metavar="CATS")
+    parser.add_argument("--sponsorblock-remove", metavar="CATS")
+    parser.add_argument("-c", "--caption-code", metavar="LANG")
+    parser.add_argument("-lc", "--list-captions", action="store_true")
+    parser.add_argument("-t", "--target", metavar="DIR")
+    parser.add_argument("-o", "--output", metavar="TEMPLATE")
+    parser.add_argument("-j", "--dump-json", action="store_true")
+    parser.add_argument("--proxy", metavar="URL")
+    parser.add_argument("--cookies", metavar="FILE")
+    parser.add_argument("--cookies-from-browser", metavar="BROWSER")
+    parser.add_argument("--geo-bypass", action="store_true")
+    parser.add_argument("--geo-bypass-country", metavar="CC")
+    parser.add_argument("--sleep-interval", metavar="N", type=float)
+    parser.add_argument("--max-sleep-interval", metavar="N", type=float)
+    parser.add_argument("--batch-file", metavar="FILE")
+    parser.add_argument("--download-archive", metavar="FILE")
+    parser.add_argument("-v", "--verbose", action="store_true")
+    parser.add_argument("--logfile", metavar="FILE")
+    parser.add_argument("--build-playback-report", action="store_true")
 
     return parser.parse_args(args)
 
@@ -938,13 +964,13 @@ def _setup_geo_bypass(args) -> None:
 
 
 def main() -> None:
-    """YouTube downloader — download videos, audio, and captions from YouTube."""
-    parser = argparse.ArgumentParser(
-        prog="pyt",
-        description=main.__doc__,
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
+    parser = argparse.ArgumentParser(prog="pyt", add_help=False)
+    parser.add_argument("-h", "--help", action="store_true")
     args = _parse_args(parser)
+
+    if getattr(args, "help", False):
+        _print_help()
+        sys.exit(0)
 
     if args.verbose:
         setup_logger(logging.DEBUG, log_filename=args.logfile)
@@ -982,12 +1008,12 @@ def main() -> None:
 
     if args.url:
         if "youtu" not in args.url:
-            parser.print_help()
+            _print_help()
             sys.exit(1)
         urls.append(args.url)
 
     if not urls:
-        parser.print_help()
+        _print_help()
         sys.exit(1)
 
     first = True

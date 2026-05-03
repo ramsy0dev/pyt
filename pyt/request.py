@@ -183,17 +183,12 @@ def stream(
 
         if file_size == default_range_size:
             try:
-                resp = _execute_request(
-                    url + f"&range={0}-{99999999999}",
-                    method="GET",
-                    timeout=timeout
-                )
-                content_range = resp.info().get("Content-Range", "")
+                content_range = response.info().get("Content-Range", "")
                 if content_range:
                     file_size = int(content_range.split("/")[-1])
                 else:
-                    file_size = int(resp.info()["Content-Length"])
-            except (KeyError, IndexError, ValueError) as e:
+                    file_size = int(response.info().get("Content-Length", default_range_size))
+            except (KeyError, IndexError, ValueError, TypeError) as e:
                 logger.error(e)
         while True:
             chunk = response.read()
