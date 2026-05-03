@@ -111,6 +111,11 @@ _BAR_WIDTH = 40
 _BAR_FULL  = "━"  # ━
 _BAR_EMPTY = "━"  # ━ (dimmed)
 
+def _clear_progress_line() -> None:
+    cols = shutil.get_terminal_size().columns
+    sys.stdout.write(f"\r{' ' * cols}\r")
+    sys.stdout.flush()
+
 def _draw_progress(bytes_recv: int, filesize: int, speed: float, eta: float) -> None:
     pct    = min(bytes_recv / filesize, 1.0) if filesize else 0
     filled = int(_BAR_WIDTH * pct)
@@ -374,7 +379,14 @@ def _download(
             file_path = _run_pp_chain(pp_chain, file_path, stream, youtube)
         return file_path
 
-    file_path = stream.download(output_path=target, filename=filename)
+    try:
+        file_path = stream.download(output_path=target, filename=filename)
+    except KeyboardInterrupt:
+        _clear_progress_line()
+        if os.path.exists(file_path):
+            os.unlink(file_path)
+        _print_warn("Interrupted — partial file removed.")
+        sys.exit(1)
     sys.stdout.write("\n")
     _print_ok(f"Saved to  {DM}{file_path}{R}")
 

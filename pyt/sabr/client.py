@@ -222,7 +222,8 @@ class SabrClient:
                 timeout=timeout,
             )
 
-            got_media = False
+            got_media = False      # data received for the requested itag
+            got_any_media = False  # data received for any format
 
             for part_type, payload in parser.feed(response):
                 if part_type == UMP_MEDIA_HEADER:
@@ -237,6 +238,7 @@ class SabrClient:
                         initialized_itags.append(current_itag)
 
                 elif part_type == UMP_MEDIA:
+                    got_any_media = True  # the server is still streaming
                     if current_itag != self._itag:
                         continue  # skip chunks for other formats
                     # Strip the mandatory leading null byte
@@ -271,8 +273,9 @@ class SabrClient:
             if self._filesize and downloaded >= self._filesize:
                 break
 
-            # Track consecutive rounds with no useful data for the requested format
-            if not got_media:
+            # Only count a round as empty when the server sent no media at all
+            # (not just no media for our itag — the server interleaves formats).
+            if not got_any_media:
                 empty_rounds += 1
                 if empty_rounds >= _MAX_EMPTY_ROUNDS:
                     logger.debug(
