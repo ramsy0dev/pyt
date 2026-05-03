@@ -18,6 +18,7 @@ from typing import List, Optional
 
 from pyt import __version__
 from pyt import CaptionQuery, Playlist, Stream, YouTube
+from pyt.contrib.channel import Channel
 from pyt.archive import DownloadArchive
 from pyt.config import apply_config, load_config
 from pyt.helpers import setup_logger, safe_filename
@@ -775,6 +776,18 @@ def _perform_args_on_youtube(
     playlist_index: Optional[int] = None,
     playlist_title: Optional[str] = None,
 ) -> None:
+    # Availability check — raises a descriptive PytError subclass if the video
+    # cannot be played (private, members-only, region-blocked, live, etc.).
+    # Non-VideoUnavailable failures (network, parse errors) are ignored here
+    # and will surface naturally when streams are accessed.
+    try:
+        youtube.check_availability()
+    except exceptions.VideoUnavailable as exc:
+        _print_err(str(exc))
+        return
+    except Exception:
+        pass
+
     # Archive check
     if archive and archive.is_downloaded(youtube.video_id):
         _print_warn(f"Skipping  {DM}{youtube.video_id}{R}  (already in archive)")
@@ -963,6 +976,20 @@ def _setup_geo_bypass(args) -> None:
     logger.debug("Geo-bypass active — spoofing IP: %s", fake_ip)
 
 
+def _is_channel_url(url: str) -> bool:
+    """Return True if *url* looks like a YouTube channel (not a video or playlist)."""
+    from urllib.parse import urlparse
+    path = urlparse(url).path.rstrip("/")
+    parts = path.split("/")
+    # /@handle  /channel/UCxxx  /c/name  /user/name
+    return (
+        any(p.startswith("@") for p in parts)
+        or "channel" in parts
+        or "c" in parts
+        or "user" in parts
+    ) and "watch" not in parts and "playlist" not in parts
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="pyt", add_help=False)
     parser.add_argument("-h", "--help", action="store_true")
@@ -1022,28 +1049,67 @@ def main() -> None:
             _sleep_between(args)
         first = False
 
-        if "/playlist" in url:
+        if _is_channel_url(url):
+            sys.stdout.write(f"\n  {DM}Loading channel …{R}\n")
+            try:
+                channel = Channel(url)
+                playlist_title = getattr(channel, "channel_name", None) or url.rstrip("/").split("/")[-1]
+                if not args.target and not template:
+                    args.target = safe_filename(playlist_title)
+                video_urls = list(channel.video_urls)
+                if not video_urls:
+                    _print_warn("No videos found on this channel.")
+                for idx, video in enumerate(channel.videos, start=1):
+                    try:
+                        _perform_args_on_youtube(
+                            video, args, archive=archive, template=template,
+                            playlist_index=idx, playlist_title=playlist_title,
+                        )
+                    except exceptions.PytError as exc:
+                        _print_err(f"{video.watch_url}  —  {exc}")
+                    if idx < len(video_urls):
+                        _sleep_between(args)
+            except Exception as exc:
+                _print_err(f"Could not load channel: {exc}")
+
+        elif "/playlist" in url:
             sys.stdout.write(f"\n  {DM}Loading playlist …{R}\n")
-            playlist = Playlist(url)
-            playlist_title = getattr(playlist, "title", None)
-            if not args.target and not template:
-                args.target = safe_filename(playlist_title or "playlist")
-            for idx, video in enumerate(playlist.videos, start=1):
-                try:
-                    _perform_args_on_youtube(
-                        video, args, archive=archive, template=template,
-                        playlist_index=idx, playlist_title=playlist_title,
-                    )
-                except exceptions.PytError as exc:
-                    _print_err(f"{video.watch_url}  —  {exc}")
-                if idx < len(list(playlist.video_urls)):
-                    _sleep_between(args)
+            try:
+                playlist = Playlist(url)
+                playlist_title = getattr(playlist, "title", None)
+                if not args.target and not template:
+                    args.target = safe_filename(playlist_title or "playlist")
+                video_urls = list(playlist.video_urls)
+                if not video_urls:
+                    _print_warn("No videos found in this playlist.")
+                for idx, video in enumerate(playlist.videos, start=1):
+                    try:
+                        _perform_args_on_youtube(
+                            video, args, archive=archive, template=template,
+                            playlist_index=idx, playlist_title=playlist_title,
+                        )
+                    except exceptions.PytError as exc:
+                        _print_err(f"{video.watch_url}  —  {exc}")
+                    if idx < len(video_urls):
+                        _sleep_between(args)
+            except exceptions.PytError as exc:
+                _print_err(f"Could not load playlist: {exc}")
+            except Exception as exc:
+                _print_err(f"Could not load playlist: {exc}")
+
         else:
             sys.stdout.write(f"\n  {DM}Fetching  {url} …{R}\n")
-            youtube = YouTube(url, proxies=proxies)
-            _perform_args_on_youtube(
-                youtube, args, archive=archive, template=template,
-            )
+            try:
+                youtube = YouTube(url, proxies=proxies)
+                _perform_args_on_youtube(
+                    youtube, args, archive=archive, template=template,
+                )
+            except exceptions.VideoUnavailable as exc:
+                _print_err(str(exc))
+            except exceptions.PytError as exc:
+                _print_err(str(exc))
+            except Exception as exc:
+                _print_err(f"Error: {exc}")
 
 
 if __name__ == "__main__":
