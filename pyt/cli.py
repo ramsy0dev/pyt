@@ -13,6 +13,7 @@ import time
 import random
 import datetime as dt
 import pyt.exceptions as exceptions
+from urllib.error import HTTPError
 
 from typing import List, Optional
 
@@ -583,11 +584,38 @@ def _ffmpeg_downloader(
     video_name = _unique_name(base, video_stream.subtype, "video", target)
     audio_name = _unique_name(base, audio_stream.subtype, "audio", target)
 
-    _download(stream=video_stream, target=target, filename=video_name)
+    video_path = os.path.join(target, f"{video_name}.{video_stream.subtype}")
+    try:
+        _download(stream=video_stream, target=target, filename=video_name)
+    except HTTPError as e:
+        if e.code != 403 or youtube is None:
+            raise
+        # CDN hasn't pre-cached this stream (common for low-view videos).
+        # Clean up the partial file and fall back to the best progressive stream.
+        _DL_STATE.clear()
+        if os.path.exists(video_path):
+            os.unlink(video_path)
+        prog = youtube.streams.get_highest_resolution()
+        if prog is None:
+            raise
+        _print_err(
+            f"DASH stream unavailable (403) — falling back to progressive "
+            f"{prog.resolution} ({prog.mime_type})"
+        )
+        prog_name = _unique_name(base, prog.subtype, "progressive", target)
+        _download(stream=prog, target=target, filename=prog_name)
+        prog_path = os.path.join(target, f"{prog_name}.{prog.subtype}")
+        final_name = final_filename or f"{base}.{prog.subtype}"
+        final_path = os.path.join(target, final_name)
+        shutil.move(prog_path, final_path)
+        _print_ok(f"Saved to   {DM}{final_path}{R}")
+        if pp_chain and youtube:
+            final_path = _run_pp_chain(pp_chain, final_path, prog, youtube)
+        return final_path
+
     _DL_STATE.clear()
     _download(stream=audio_stream, target=target, filename=audio_name)
 
-    video_path = os.path.join(target, f"{video_name}.{video_stream.subtype}")
     audio_path = os.path.join(target, f"{audio_name}.{audio_stream.subtype}")
     final_name = final_filename or f"{base}.{video_stream.subtype}"
     final_path = os.path.join(target, final_name)
@@ -772,6 +800,10 @@ def _parse_args(
     parser.add_argument("--proxy", metavar="URL")
     parser.add_argument("--cookies", metavar="FILE")
     parser.add_argument("--cookies-from-browser", metavar="BROWSER")
+    parser.add_argument(
+        "--po-token", metavar="TOKEN",
+        help="Proof-of-origin token (base64url). Obtain with: yt-dlp --get-po-token <url>",
+    )
     parser.add_argument("--geo-bypass", action="store_true")
     parser.add_argument("--geo-bypass-country", metavar="CC")
     parser.add_argument("--sleep-interval", metavar="N", type=float)
@@ -1119,7 +1151,7 @@ def main() -> None:
         else:
             sys.stdout.write(f"\n  {DM}Fetching  {url} …{R}\n")
             try:
-                youtube = YouTube(url, proxies=proxies)
+                youtube = YouTube(url, proxies=proxies, po_token=args.po_token)
                 _perform_args_on_youtube(
                     youtube, args, archive=archive, template=template,
                 )

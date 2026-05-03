@@ -316,19 +316,43 @@ class Stream:
             self.on_complete(file_path)
             return file_path
 
-        bytes_remaining = self.filesize
-        logger.debug(f'downloading ({self.filesize} total bytes) file to {file_path}')
+        bytes_remaining = self.filesize_approx
+        logger.debug(f'downloading ({bytes_remaining} total bytes approx) file to {file_path}')
+
+        sabr_url        = self._monostate.sabr_url
+        po_token        = self._monostate.po_token
+        ustreamer_cfg   = self._monostate.ustreamer_config
 
         with open(file_path, "wb") as fh:
+            if sabr_url:
+                try:
+                    for chunk in request.sabr_stream(
+                        sabr_url,
+                        self.itag,
+                        ustreamer_config=ustreamer_cfg,
+                        po_token=po_token,
+                        is_video=(self.type == 'video'),
+                        filesize=self.filesize_approx,
+                        duration_ms=(self._monostate.duration or 0) * 1000,
+                        timeout=timeout,
+                    ):
+                        bytes_remaining -= len(chunk)
+                        self.on_progress(chunk, fh, bytes_remaining)
+                    self.on_complete(file_path)
+                    return file_path
+                except Exception as exc:
+                    logger.warning('SABR failed (%s), falling back to range download', exc)
+                    fh.seek(0)
+                    fh.truncate()
+                    bytes_remaining = self.filesize
+
             try:
                 for chunk in request.stream(
                     self.url,
                     timeout=timeout,
                     max_retries=max_retries
                 ):
-                    # reduce the (bytes) remainder by the length of the chunk.
                     bytes_remaining -= len(chunk)
-                    # send to the on_progress callback.
                     self.on_progress(chunk, fh, bytes_remaining)
             except HTTPError as e:
                 if e.code not in (403, 404):

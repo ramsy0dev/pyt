@@ -52,7 +52,8 @@ class YouTube:
         on_complete_callback: Optional[Callable[[Any, Optional[str]], None]] = None,
         proxies: Dict[str, str] = None,
         use_oauth: bool = False,
-        allow_oauth_cache: bool = True
+        allow_oauth_cache: bool = True,
+        po_token: Optional[str] = None,
     ):
         """Construct a :class:`YouTube <YouTube>`.
 
@@ -108,6 +109,7 @@ class YouTube:
 
         self.use_oauth = use_oauth
         self.allow_oauth_cache = allow_oauth_cache
+        self._po_token = po_token
 
     def __repr__(self):
         return f'<pyt.__main__.YouTube object: videoId={self.video_id}>'
@@ -183,6 +185,35 @@ class YouTube:
         return self.vid_info['streamingData']
 
     @property
+    def sabr_url(self) -> Optional[str]:
+        """SABR streaming endpoint URL, if present in the player response."""
+        return self.streaming_data.get('serverAbrStreamingUrl')
+
+    @property
+    def ustreamer_config(self) -> Optional[bytes]:
+        """Raw videoPlaybackUstreamerConfig bytes for SABR requests.
+
+        Located at vid_info['playerConfig']['mediaCommonConfig']
+        ['mediaUstreamerRequestConfig']['videoPlaybackUstreamerConfig']
+        as a base64url-encoded string.
+        """
+        try:
+            raw = (
+                self.vid_info
+                .get('playerConfig', {})
+                .get('mediaCommonConfig', {})
+                .get('mediaUstreamerRequestConfig', {})
+                .get('videoPlaybackUstreamerConfig')
+            )
+            if not raw:
+                return None
+            import base64
+            padded = raw + '=' * (-len(raw) % 4)
+            return base64.urlsafe_b64decode(padded)
+        except Exception:
+            return None
+
+    @property
     def fmt_streams(self):
         """Returns a list of streams if they have been initialized.
 
@@ -222,6 +253,9 @@ class YouTube:
 
         self.stream_monostate.title = self.title
         self.stream_monostate.duration = self.length
+        self.stream_monostate.sabr_url = self.sabr_url
+        self.stream_monostate.ustreamer_config = self.ustreamer_config
+        self.stream_monostate.po_token = self._po_token
 
         return self._fmt_streams
 

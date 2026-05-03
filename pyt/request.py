@@ -205,6 +205,39 @@ def stream(
     return  # pylint: disable=R1711
 
 
+def sabr_stream(
+    sabr_url: str,
+    itag: int,
+    ustreamer_config=None,
+    po_token=None,
+    is_video: bool = True,
+    filesize: int = 0,
+    duration_ms: int = 0,
+    timeout=socket._GLOBAL_DEFAULT_TIMEOUT,
+):
+    """Stream media bytes via YouTube's SABR protocol.
+
+    :param str sabr_url: serverAbrStreamingUrl from the InnerTube player response.
+    :param int itag: Format itag to request.
+    :param bytes ustreamer_config: Raw videoPlaybackUstreamerConfig bytes.
+    :param str po_token: Optional proof-of-origin token (base64url).
+    :param bool is_video: True for video streams, False for audio.
+    :param int filesize: Total stream size in bytes (for player-time progression).
+    :param int duration_ms: Video duration in milliseconds (for player-time progression).
+    :rtype: Iterable[bytes]
+    """
+    from pyt.sabr.client import SabrClient
+    yield from SabrClient(
+        sabr_url=sabr_url,
+        itag=itag,
+        ustreamer_config=ustreamer_config,
+        po_token=po_token,
+        is_video=is_video,
+        filesize=filesize,
+        duration_ms=duration_ms,
+    ).stream(timeout=timeout)
+
+
 @lru_cache()
 def filesize(url):
     """Fetch size in bytes of file at given URL
