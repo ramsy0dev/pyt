@@ -22,3 +22,8 @@ class Monostate:
         self.sabr_url = sabr_url
         self.po_token = po_token
         self.ustreamer_config = ustreamer_config
+        # Optional callback that re-fetches the player response and updates
+        # sabr_url / ustreamer_config in-place (for SABR token refresh).
+        self.refresh_sabr_config: Optional[Callable[[], None]] = None
+        # Extra headers to use for CDN stream requests (e.g. client User-Agent).
+        self.stream_headers: dict = {}

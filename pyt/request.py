@@ -140,14 +140,17 @@ def seq_stream(
 def stream(
     url,
     timeout=socket._GLOBAL_DEFAULT_TIMEOUT,
-    max_retries=0
+    max_retries=0,
+    start_byte=0,
+    extra_headers=None,
 ):
     """Read the response in chunks.
     :param str url: The URL to perform the GET request for.
+    :param int start_byte: Resume offset — skip this many bytes from the start.
     :rtype: Iterable[bytes]
     """
     file_size: int = default_range_size  # fake filesize to start
-    downloaded = 0
+    downloaded = start_byte
     cdn_url = url
     # YouTube CDN enforces per-request range size limits that vary by client
     # type and byte offset. Start at the default and halve on 403 to adapt.
@@ -162,10 +165,13 @@ def stream(
                 raise MaxRetriesExceeded()
 
             try:
+                req_headers = {"Range": f"bytes={downloaded}-{stop_pos}"}
+                if extra_headers:
+                    req_headers.update(extra_headers)
                 response = _execute_request(
                     cdn_url,
                     method="GET",
-                    headers={"Range": f"bytes={downloaded}-{stop_pos}"},
+                    headers=req_headers,
                     timeout=timeout
                 )
                 if cdn_url == url:
@@ -213,6 +219,7 @@ def sabr_stream(
     is_video: bool = True,
     filesize: int = 0,
     duration_ms: int = 0,
+    already_downloaded: int = 0,
     timeout=socket._GLOBAL_DEFAULT_TIMEOUT,
 ):
     """Stream media bytes via YouTube's SABR protocol.
@@ -224,6 +231,7 @@ def sabr_stream(
     :param bool is_video: True for video streams, False for audio.
     :param int filesize: Total stream size in bytes (for player-time progression).
     :param int duration_ms: Video duration in milliseconds (for player-time progression).
+    :param int already_downloaded: Bytes already on disk (resume offset).
     :rtype: Iterable[bytes]
     """
     from pyt.sabr.client import SabrClient
@@ -235,6 +243,7 @@ def sabr_stream(
         is_video=is_video,
         filesize=filesize,
         duration_ms=duration_ms,
+        already_downloaded=already_downloaded,
     ).stream(timeout=timeout)
 
 

@@ -591,9 +591,11 @@ def _ffmpeg_downloader(
     video_name = _unique_name(base, video_stream.subtype, "video", target)
     audio_name = _unique_name(base, audio_stream.subtype, "audio", target)
 
-    video_path = os.path.join(target, f"{video_name}.{video_stream.subtype}")
+    video_filename = f"{video_name}.{video_stream.subtype}"
+    audio_filename = f"{audio_name}.{audio_stream.subtype}"
+    video_path = os.path.join(target, video_filename)
     try:
-        _download(stream=video_stream, target=target, filename=video_name)
+        _download(stream=video_stream, target=target, filename=video_filename)
     except HTTPError as e:
         if e.code != 403 or youtube is None:
             raise
@@ -610,8 +612,9 @@ def _ffmpeg_downloader(
             f"{prog.resolution} ({prog.mime_type})"
         )
         prog_name = _unique_name(base, prog.subtype, "progressive", target)
-        _download(stream=prog, target=target, filename=prog_name)
-        prog_path = os.path.join(target, f"{prog_name}.{prog.subtype}")
+        prog_filename = f"{prog_name}.{prog.subtype}"
+        _download(stream=prog, target=target, filename=prog_filename)
+        prog_path = os.path.join(target, prog_filename)
         final_name = final_filename or f"{base}.{prog.subtype}"
         final_path = os.path.join(target, final_name)
         shutil.move(prog_path, final_path)
@@ -621,9 +624,9 @@ def _ffmpeg_downloader(
         return final_path
 
     _DL_STATE.clear()
-    _download(stream=audio_stream, target=target, filename=audio_name)
+    _download(stream=audio_stream, target=target, filename=audio_filename)
 
-    audio_path = os.path.join(target, f"{audio_name}.{audio_stream.subtype}")
+    audio_path = os.path.join(target, audio_filename)
     final_name = final_filename or f"{base}.{video_stream.subtype}"
     final_path = os.path.join(target, final_name)
 

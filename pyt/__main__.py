@@ -27,16 +27,16 @@ from pyt import (
     StreamQuery
 )
 from pyt.helpers import install_proxy
-from pyt.innertube import InnerTube
+from pyt.innertube import InnerTube, _default_clients
 from pyt.metadata import YouTubeMetadata
 from pyt.monostate import Monostate
 
 logger = logging.getLogger(__name__)
 
 # Clients tried in order when fetching player data for non-age-restricted videos.
-# ANDROID and IOS return pre-signed stream URLs (no cipher decryption needed).
-# TV_EMBED provides a fallback for restricted content that slips past the others.
-_PLAYER_CLIENT_PRIORITY = ['ANDROID', 'IOS', 'TV_EMBED']
+# ANDROID_VR (version ≤1.65) returns direct signed URLs for all adaptive formats
+# without SABR-only enforcement. Newer ANDROID versions require SABR for many streams.
+_PLAYER_CLIENT_PRIORITY = ['ANDROID_VR', 'ANDROID', 'IOS', 'TV_EMBED']
 
 # Web-based clients whose version string can be updated from the live page.
 _WEB_CLIENTS = {'WEB', 'WEB_EMBED', 'WEB_MUSIC', 'WEB_CREATOR', 'MWEB', 'TV_EMBED'}
@@ -257,6 +257,16 @@ class YouTube:
         self.stream_monostate.ustreamer_config = self.ustreamer_config
         self.stream_monostate.po_token = self._po_token
 
+        _ms = self.stream_monostate
+        _yt = self
+
+        def _refresh_sabr_config():
+            _yt._vid_info = None  # force player re-fetch on next access
+            _ms.sabr_url = _yt.sabr_url
+            _ms.ustreamer_config = _yt.ustreamer_config
+
+        self.stream_monostate.refresh_sabr_config = _refresh_sabr_config
+
         return self._fmt_streams
 
     def check_availability(self):
@@ -347,6 +357,7 @@ class YouTube:
                 if status == 'OK' and 'streamingData' in response:
                     logger.debug("player data from %s client", client)
                     self._vid_info = response
+                    self.stream_monostate.stream_headers = _default_clients.get(client, {}).get('header', {})
                     return self._vid_info
             except Exception:
                 pass

@@ -42,6 +42,30 @@ _default_clients = {
         },
         'api_key': 'AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8'
     },
+    # ANDROID_VR at version ≤1.65 bypasses SABR-only stream enforcement and
+    # returns direct signed URLs for all adaptive formats (same approach as
+    # yt-dlp's android_vr client). Versions >1.65 return SABR-only streams.
+    'ANDROID_VR': {
+        'context': {
+            'client': {
+                'clientName': 'ANDROID_VR',
+                'clientVersion': '1.65.10',
+                'deviceMake': 'Oculus',
+                'deviceModel': 'Quest 3',
+                'androidSdkVersion': 32,
+                'hl': 'en',
+                'userAgent': 'com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip',
+                'osName': 'Android',
+                'osVersion': '12L',
+            }
+        },
+        'header': {
+            'User-Agent': 'com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip',
+            'X-Youtube-Client-Name': '28',
+            'X-Youtube-Client-Version': '1.65.10',
+        },
+        'api_key': 'AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8'
+    },
     'ANDROID': {
         'context': {
             'client': {

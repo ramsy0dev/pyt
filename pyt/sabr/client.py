@@ -27,7 +27,7 @@ from pyt import request
 
 logger = logging.getLogger(__name__)
 
-# Safety cap: stop after this many consecutive round-trips with no media data
+# Stop after this many consecutive rounds with no UMP_MEDIA for any format.
 _MAX_EMPTY_ROUNDS = 3
 
 
@@ -40,11 +40,7 @@ def _format_id(itag: int) -> bytes:
 
 
 def _client_abr_state(track_types: int, player_time_ms: int = 0) -> bytes:
-    """ClientAbrState { field 28: player_time_ms, field 40: enabled_track_types_bitfield }
-
-    track_types: 1=audio, 2=video, 3=both
-    Field 28 is player_time_ms (verified against yt-dlp PR #13515 proto).
-    """
+    """ClientAbrState { field 28: player_time_ms, field 40: enabled_track_types_bitfield }"""
     msg = b''
     if player_time_ms:
         msg += field_varint(28, player_time_ms)
@@ -94,7 +90,7 @@ def _build_vpabr(
 
     msg = b''
 
-    # Field 1: ClientAbrState (includes player_time_ms at field 28 inside)
+    # Field 1: ClientAbrState
     msg += field_message(1, _client_abr_state(track_types, player_time_ms))
 
     # Field 2: initialized_format_ids (skip resending init segment for these)
@@ -106,11 +102,10 @@ def _build_vpabr(
         for itag, start_ms, dur_ms in buffered_ranges:
             msg += field_message(3, _buffered_range(itag, start_ms, dur_ms))
 
-    # Field 4: player_time_ms — redundant with ClientAbrState field 28 but
-    # both are sent by the official client
+    # Field 4: player_time_ms
     msg += field_varint(4, player_time_ms)
 
-    # Field 5: videoPlaybackUstreamerConfig — session auth blob from InnerTube
+    # Field 5: videoPlaybackUstreamerConfig
     if ustreamer_config:
         msg += field_bytes(5, ustreamer_config)
 
@@ -133,14 +128,7 @@ def _build_vpabr(
 
 
 class SabrClient:
-    """Download one YouTube stream via the SABR protocol.
-
-    Usage::
-
-        client = SabrClient(sabr_url, itag, ustreamer_config, po_token, is_video)
-        for chunk in client.stream():
-            fh.write(chunk)
-    """
+    """Download one YouTube stream via the SABR protocol."""
 
     def __init__(
         self,
@@ -151,6 +139,7 @@ class SabrClient:
         is_video: bool = True,
         filesize: int = 0,
         duration_ms: int = 0,
+        already_downloaded: int = 0,
     ):
         self._sabr_url = sabr_url
         self._itag = itag
@@ -158,6 +147,7 @@ class SabrClient:
         self._is_video = is_video
         self._filesize = filesize
         self._duration_ms = duration_ms
+        self._already_downloaded = already_downloaded
 
         self._po_token_bytes: Optional[bytes] = None
         if po_token:
@@ -173,16 +163,21 @@ class SabrClient:
     ) -> Iterator[bytes]:
         """Yield raw media bytes for the requested itag.
 
-        Sends follow-up SABR requests (rn=0, rn=1, …) until the server stops
-        sending data.  The server may interleave multiple formats (e.g. audio
-        and video) in a single UMP stream; only chunks for self._itag are
-        yielded.  A single stateful UmpParser handles parts that span response
-        boundaries.
+        When already_downloaded > 0 (a resume), the first request sends
+        buffered_ranges so the server skips content we already have and
+        delivers only the remainder.
         """
-        downloaded = 0
+        # Start downloaded counter at the resume offset so player_time_ms
+        # and termination checks are computed relative to the full file.
+        downloaded = self._already_downloaded
         player_time_ms = 0
-        initialized_itags: list = []   # all formats whose init segment we've seen
-        current_itag: Optional[int] = None  # format context set by last MEDIA_HEADER
+        if self._already_downloaded and self._filesize and self._duration_ms:
+            player_time_ms = int(
+                self._already_downloaded * self._duration_ms / self._filesize
+            )
+
+        initialized_itags: list = []
+        current_itag: Optional[int] = None
         rn = 0
         empty_rounds = 0
 
@@ -192,10 +187,11 @@ class SabrClient:
         audio_itag = self._itag if not self._is_video else None
 
         while True:
-            # Tell the server what we already have so it skips ahead
+            # Tell the server what we already have so it delivers only the rest.
             buffered_ranges = None
-            if player_time_ms > 0 and downloaded > 0:
-                buffered_ranges = [(self._itag, 0, player_time_ms)]
+            if downloaded > 0 and self._filesize and self._duration_ms:
+                buf_ms = int(downloaded * self._duration_ms / self._filesize)
+                buffered_ranges = [(self._itag, 0, buf_ms)]
 
             body = _build_vpabr(
                 video_itag=video_itag,
@@ -222,8 +218,8 @@ class SabrClient:
                 timeout=timeout,
             )
 
-            got_media = False      # data received for the requested itag
-            got_any_media = False  # data received for any format
+            got_media = False      # new bytes for our itag this round
+            got_any_media = False  # UMP_MEDIA received for ANY format
 
             for part_type, payload in parser.feed(response):
                 if part_type == UMP_MEDIA_HEADER:
@@ -233,16 +229,16 @@ class SabrClient:
                         'SABR MEDIA_HEADER itag=%s content_length=%s',
                         current_itag, info.get('content_length'),
                     )
-                    # Track ALL seen formats so we don't re-request their init segments
                     if current_itag and current_itag not in initialized_itags:
                         initialized_itags.append(current_itag)
 
                 elif part_type == UMP_MEDIA:
-                    got_any_media = True  # the server is still streaming
+                    got_any_media = True
                     if current_itag != self._itag:
-                        continue  # skip chunks for other formats
-                    # Strip the mandatory leading null byte
-                    chunk = payload[1:] if payload and payload[0] == 0 else payload
+                        continue
+                    # Strip the leb128 sequence-number prefix (1 byte for seq 0-127).
+                    # The prefix is present on every UMP_MEDIA part, not just seq=0.
+                    chunk = payload[1:] if payload else b''
                     if chunk:
                         downloaded += len(chunk)
                         got_media = True
@@ -251,36 +247,25 @@ class SabrClient:
                 elif part_type == UMP_MEDIA_END:
                     logger.debug('SABR MEDIA_END itag=%s downloaded=%d', current_itag, downloaded)
                     current_itag = None
-                    # Do NOT break the outer loop — the server sends multiple
-                    # MEDIA_END events (one per segment / format switch).
 
                 else:
-                    logger.debug(
-                        'SABR part type=%d len=%d (skipped)',
-                        part_type, len(payload),
-                    )
+                    logger.debug('SABR part type=%d len=%d (skipped)', part_type, len(payload))
 
             rn += 1
 
-            # Advance player position for next request so the server delivers
-            # the next window of content rather than restarting from position 0
             if self._filesize and self._duration_ms and downloaded > 0:
                 player_time_ms = int(downloaded * self._duration_ms / self._filesize)
                 if player_time_ms >= self._duration_ms:
-                    break  # downloaded the full video duration worth of data
+                    break
 
-            # Stop if we've downloaded at least the known file size
             if self._filesize and downloaded >= self._filesize:
                 break
 
-            # Only count a round as empty when the server sent no media at all
-            # (not just no media for our itag — the server interleaves formats).
             if not got_any_media:
                 empty_rounds += 1
                 if empty_rounds >= _MAX_EMPTY_ROUNDS:
                     logger.debug(
-                        'SABR: %d consecutive empty rounds, done '
-                        '(downloaded=%d for itag=%d)',
+                        'SABR: %d empty rounds, stopping (downloaded=%d itag=%d)',
                         empty_rounds, downloaded, self._itag,
                     )
                     break
