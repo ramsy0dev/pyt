@@ -107,29 +107,24 @@ def _fmt_duration(seconds: int) -> str:
 
 _DL_STATE: dict = {}
 
-BAR_FILL  = "█"
-BAR_EMPTY = "░"
+_BAR_WIDTH = 40
+_BAR_FULL  = "━"  # ━
+_BAR_EMPTY = "━"  # ━ (dimmed)
 
 def _draw_progress(bytes_recv: int, filesize: int, speed: float, eta: float) -> None:
-    cols     = shutil.get_terminal_size().columns
-    pct      = bytes_recv / filesize if filesize else 0
-    pct_str  = f"{pct * 100:5.1f}%"
-    size_str = f"{_fmt_bytes(bytes_recv)} / {_fmt_bytes(filesize)}"
-    spd_str  = f"{_fmt_bytes(int(speed))}/s" if speed > 0 else "-- B/s"
-    eta_str  = f"ETA {_fmt_seconds(eta)}" if eta > 0 and pct < 1 else ("Done" if pct >= 1 else "")
+    pct    = min(bytes_recv / filesize, 1.0) if filesize else 0
+    filled = int(_BAR_WIDTH * pct)
+    empty  = _BAR_WIDTH - filled
 
-    right = f"  {DM}{size_str}{R}  {CY}{spd_str}{R}  {DM}{eta_str}{R}"
-    right_plain_len = len(size_str) + len(spd_str) + len(eta_str) + 8
+    bar      = f"{BGN}{_BAR_FULL * filled}{R}{DM}{_BAR_EMPTY * empty}{R}"
+    size_str = f"{_fmt_bytes(bytes_recv)}/{_fmt_bytes(filesize)}"
+    spd_str  = f"{_fmt_bytes(int(speed))}/s" if speed > 0 else ""
+    eta_str  = f"eta {_fmt_seconds(eta)}" if eta > 0 and pct < 1 else ""
 
-    bar_space = cols - 4 - len(pct_str) - right_plain_len - 2
-    bar_space = max(10, bar_space)
+    parts = [s for s in (size_str, spd_str, eta_str) if s]
+    meta  = "  ".join(parts)
 
-    filled    = int(bar_space * pct)
-    remaining = bar_space - filled
-    bar       = f"{BGN}{BAR_FILL * filled}{R}{DM}{BAR_EMPTY * remaining}{R}"
-
-    line = f"\r  {bar}  {B}{pct_str}{R}{right}"
-    sys.stdout.write(line)
+    sys.stdout.write(f"\r  {bar}  {DM}{meta}{R}  ")
     sys.stdout.flush()
 
 

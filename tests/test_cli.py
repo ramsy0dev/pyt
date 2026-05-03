@@ -122,7 +122,8 @@ def test_print_available_captions(capsys):
 def test_draw_progress_bar(capsys):
     cli._draw_progress(bytes_recv=25, filesize=100, speed=1024 * 50, eta=1.5)
     out, _ = capsys.readouterr()
-    assert "25.0%" in out
+    assert "25 B/100 B" in out
+    assert "eta" in out
 
 @mock.patch("pyt.Stream")
 def test_on_progress(stream):

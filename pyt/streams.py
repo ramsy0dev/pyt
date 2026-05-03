@@ -316,12 +316,15 @@ class Stream:
             self.on_complete(file_path)
             return file_path
 
-        bytes_remaining = self.filesize_approx
-        logger.debug(f'downloading ({bytes_remaining} total bytes approx) file to {file_path}')
-
         sabr_url        = self._monostate.sabr_url
         po_token        = self._monostate.po_token
         ustreamer_cfg   = self._monostate.ustreamer_config
+
+        # Use the exact contentLength for progress when available; fall back to
+        # the bitrate estimate only for streams where contentLength is missing.
+        known_filesize = self.filesize if self._filesize else self.filesize_approx
+        bytes_remaining = known_filesize
+        logger.debug(f'downloading ({bytes_remaining} total bytes) file to {file_path}')
 
         with open(file_path, "wb") as fh:
             if sabr_url:
@@ -332,11 +335,11 @@ class Stream:
                         ustreamer_config=ustreamer_cfg,
                         po_token=po_token,
                         is_video=(self.type == 'video'),
-                        filesize=self.filesize_approx,
+                        filesize=known_filesize,
                         duration_ms=(self._monostate.duration or 0) * 1000,
                         timeout=timeout,
                     ):
-                        bytes_remaining -= len(chunk)
+                        bytes_remaining = max(0, bytes_remaining - len(chunk))
                         self.on_progress(chunk, fh, bytes_remaining)
                     self.on_complete(file_path)
                     return file_path
