@@ -148,37 +148,37 @@ def stream(
     """
     file_size: int = default_range_size  # fake filesize to start
     downloaded = 0
+    # After the first chunk we pin to the post-redirect CDN URL so that
+    # subsequent range requests don't re-trigger the 302 → CDN handshake,
+    # which YouTube only allows once per stream URL.
+    cdn_url = url
+
     while downloaded < file_size:
         stop_pos = min(downloaded + default_range_size, file_size) - 1
-        range_header = f"bytes={downloaded}-{stop_pos}"
         tries = 0
 
-        # Attempt to make the request multiple times as necessary.
         while True:
-            # If the max retries is exceeded, raise an exception
             if tries >= 1 + max_retries:
                 raise MaxRetriesExceeded()
 
-            # Try to execute the request, ignoring socket timeouts
             try:
                 response = _execute_request(
-                    url,
+                    cdn_url,
                     method="GET",
                     headers={"Range": f"bytes={downloaded}-{stop_pos}"},
                     timeout=timeout
                 )
+                # Pin to the final CDN URL after the first successful redirect
+                if cdn_url == url:
+                    cdn_url = response.geturl()
             except URLError as e:
-                # We only want to skip over timeout errors, and
-                # raise any other URLError exceptions
                 if isinstance(e.reason, socket.timeout):
                     pass
                 else:
                     raise
             except http.client.IncompleteRead:
-                # Allow retries on IncompleteRead errors for unreliable connections
                 pass
             else:
-                # On a successful request, break from loop
                 break
             tries += 1
 
@@ -190,6 +190,7 @@ def stream(
                     file_size = int(content_range.split("/")[-1])
             except (IndexError, ValueError, TypeError) as e:
                 logger.error(e)
+
         while True:
             chunk = response.read()
             if not chunk:
