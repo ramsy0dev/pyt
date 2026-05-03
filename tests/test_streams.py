@@ -348,7 +348,7 @@ def test_segmented_stream_on_404(cipher_signature):
 
             # Handle filesize requests
             mock_head.side_effect = [
-                HTTPError('', 404, 'Not Found', '', ''),
+                HTTPError('', 404, 'Not Found', {}, None),
                 *response_headers[1:],
             ]
 
@@ -363,7 +363,7 @@ def test_segmented_stream_on_404(cipher_signature):
 
             # This handles the HEAD requests to get content-length
             mock_url_open_object.info.side_effect = [
-                HTTPError('', 404, 'Not Found', '', ''),
+                HTTPError('', 404, 'Not Found', {}, None),
                 *response_headers
             ]
 
@@ -384,7 +384,7 @@ def test_segmented_stream_on_404(cipher_signature):
 def test_segmented_only_catches_404(cipher_signature):
     stream = cipher_signature.streams.filter(adaptive=True)[0]
     with mock.patch('pyt.request.stream') as mock_stream:
-        mock_stream.side_effect = HTTPError('', 403, 'Forbidden', '', '')
+        mock_stream.side_effect = HTTPError('', 403, 'Forbidden', {}, None)
         with mock.patch("pyt.streams.open", mock.mock_open(), create=True):
             with pytest.raises(HTTPError):
                 stream.download()

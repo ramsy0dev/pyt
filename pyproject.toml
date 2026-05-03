@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "pyt"
-version = "1.0.0"
-description = "Python 3 library for downloading YouTube videos."
+version = "1.1.0"
+description = "A maintained pytube fork for downloading YouTube videos."
 authors = ["ramsy0dev <ramsy0dev@gmail.com>"]
 readme = "README.md"
 license = "MIT"
@@ -20,6 +20,13 @@ classifiers = [
 
 [tool.poetry.dependencies]
 python = ">=3.10,<4.0"
+mutagen = {version = ">=1.47.0", optional = true}
+browser-cookie3 = {version = ">=0.19.1", optional = true}
+
+[tool.poetry.extras]
+metadata = ["mutagen"]
+cookies  = ["browser-cookie3"]
+all      = ["mutagen", "browser-cookie3"]
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^9.0.3"

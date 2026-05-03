@@ -13,3 +13,13 @@ from pyt.__main__ import YouTube
 from pyt.contrib.playlist import Playlist
 from pyt.contrib.channel import Channel
 from pyt.contrib.search import Search
+from pyt.archive import DownloadArchive
+from pyt.template import OutputTemplate
+from pyt.postprocessors import (
+    AudioExtractor,
+    FFmpegMetadataEmbedder,
+    EmbedThumbnailPostProcessor,
+    EmbedSubtitlePostProcessor,
+    SponsorBlockPP,
+    PostProcessorError,
+)

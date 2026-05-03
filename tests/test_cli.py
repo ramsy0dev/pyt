@@ -247,7 +247,11 @@ def test_download_with_playlist(perform_args_on_youtube, playlist, youtube):
     cli.main()
     # Then
     playlist.assert_called()
-    perform_args_on_youtube.assert_called_with(youtube, args)
+    perform_args_on_youtube.assert_called_with(
+        youtube, args,
+        archive=None, template=None, playlist_index=1,
+        playlist_title=playlist_instance.title,
+    )
 
 @mock.patch("pyt.cli.YouTube")
 @mock.patch("pyt.cli.Playlist")
@@ -284,7 +288,7 @@ def test_download_by_resolution(download, stream, stream_query, youtube):
         youtube=youtube, resolution="320p", target="test_target"
     )
     # Then
-    download.assert_called_with(stream, target="test_target")
+    download.assert_called_with(stream, target="test_target", filename=None, pp_chain=None, youtube=youtube)
 
 @mock.patch("pyt.cli.YouTube")
 @mock.patch("pyt.StreamQuery")
@@ -323,7 +327,7 @@ def test_perform_args_should_ffmpeg_process(ffmpeg_process, youtube):
     cli._perform_args_on_youtube(youtube, args)
     # Then
     ffmpeg_process.assert_called_with(
-        youtube=youtube, resolution="best", target=None
+        youtube=youtube, resolution="best", target=None, pp_chain=[], final_filename=None
     )
 
 @mock.patch("pyt.cli.YouTube")
@@ -345,7 +349,8 @@ def test_ffmpeg_process_best_should_download(  # noqa: PT019
     cli.ffmpeg_process(youtube, "best", target)
     # Then
     _ffmpeg_downloader.assert_called_with(
-        audio_stream=audio_stream, video_stream=video_stream, target=target
+        audio_stream=audio_stream, video_stream=video_stream, target=target,
+        pp_chain=None, youtube=youtube, final_filename=None,
     )
 
 @mock.patch("pyt.cli.YouTube")
@@ -365,7 +370,8 @@ def test_ffmpeg_process_res_should_download(  # noqa: PT019
     cli.ffmpeg_process(youtube, "XYZp", target)
     # Then
     _ffmpeg_downloader.assert_called_with(
-        audio_stream=audio_stream, video_stream=video_stream, target=target
+        audio_stream=audio_stream, video_stream=video_stream, target=target,
+        pp_chain=None, youtube=youtube, final_filename=None,
     )
 
 @mock.patch("pyt.cli.YouTube")
@@ -402,7 +408,8 @@ def test_ffmpeg_process_audio_none_should_fallback_download(  # noqa: PT019
     cli.ffmpeg_process(youtube, "best", target)
     # Then
     _ffmpeg_downloader.assert_called_with(
-        audio_stream=stream, video_stream=stream, target=target
+        audio_stream=stream, video_stream=stream, target=target,
+        pp_chain=None, youtube=youtube, final_filename=None,
     )
 
 @mock.patch("pyt.cli.YouTube")
@@ -489,7 +496,7 @@ def test_download_audio(youtube, download):
     # When
     cli.download_audio(youtube_instance, "filetype", "target")
     # Then
-    download.assert_called_with(audio_stream, target="target")
+    download.assert_called_with(audio_stream, target="target", filename=None, pp_chain=None, youtube=youtube_instance)
 
 @mock.patch("pyt.cli._download")
 @mock.patch("pyt.cli.YouTube")

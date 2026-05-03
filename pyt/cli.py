@@ -10,6 +10,7 @@ import logging
 import argparse
 import subprocess  # nosec
 import time
+import random
 import datetime as dt
 import pyt.exceptions as exceptions
 
@@ -17,7 +18,19 @@ from typing import List, Optional
 
 from pyt import __version__
 from pyt import CaptionQuery, Playlist, Stream, YouTube
+from pyt.archive import DownloadArchive
+from pyt.config import apply_config, load_config
 from pyt.helpers import setup_logger, safe_filename
+from pyt.postprocessors import (
+    AudioExtractor,
+    EmbedSubtitlePostProcessor,
+    EmbedThumbnailPostProcessor,
+    FFmpegMetadataEmbedder,
+    PostProcessorError,
+    SponsorBlockPP,
+)
+from pyt.postprocessors.sponsorblock import ALL_CATEGORIES
+from pyt.template import DEFAULT_TEMPLATE, OutputTemplate
 
 logger = logging.getLogger(__name__)
 
@@ -119,14 +132,12 @@ def _draw_progress(bytes_recv: int, filesize: int, speed: float, eta: float) -> 
 
 
 def on_progress(stream: Stream, chunk: bytes, bytes_remaining: int) -> None:
-    filesize     = stream.filesize
-    bytes_recv   = filesize - bytes_remaining
-    now          = time.monotonic()
+    filesize   = stream.filesize
+    bytes_recv = filesize - bytes_remaining
+    now        = time.monotonic()
 
     if not _DL_STATE:
         _DL_STATE["start"] = now
-        _DL_STATE["last_t"] = now
-        _DL_STATE["last_b"] = 0
 
     elapsed = now - _DL_STATE["start"]
     speed   = bytes_recv / elapsed if elapsed > 0 else 0
@@ -204,11 +215,11 @@ def display_streams(youtube: YouTube) -> None:
 
 def _show_video_info(youtube: YouTube) -> None:
     try:
-        title   = youtube.title
-        author  = youtube.author
-        length  = _fmt_duration(youtube.length)
-        views   = f"{youtube.views:,}"
-        url     = youtube.watch_url
+        title  = youtube.title
+        author = youtube.author
+        length = _fmt_duration(youtube.length)
+        views  = f"{youtube.views:,}"
+        url    = youtube.watch_url
     except Exception:
         return
 
@@ -220,13 +231,135 @@ def _show_video_info(youtube: YouTube) -> None:
     sys.stdout.write("\n")
 
 
+# ── Post-processor chain ──────────────────────────────────────────────────────
+
+def _parse_categories(raw: str) -> List[str]:
+    """Parse comma-separated SponsorBlock categories, or ``"all"``."""
+    if raw.strip().lower() == "all":
+        return ALL_CATEGORIES
+    return [c.strip() for c in raw.split(",") if c.strip()]
+
+
+def _build_pp_chain(args) -> list:
+    """Assemble the ordered list of post-processors from CLI args."""
+    pps = []
+
+    if not shutil.which("ffmpeg"):
+        _needs = []
+        if getattr(args, "sponsorblock_mark", None):
+            _needs.append("--sponsorblock-mark")
+        if getattr(args, "sponsorblock_remove", None):
+            _needs.append("--sponsorblock-remove")
+        if getattr(args, "extract_audio", False):
+            _needs.append("-x / --extract-audio")
+        if getattr(args, "embed_metadata", False):
+            _needs.append("--embed-metadata")
+        if getattr(args, "embed_thumbnail", False):
+            _needs.append("--embed-thumbnail")
+        if getattr(args, "embed_subs", False):
+            _needs.append("--embed-subs")
+        if _needs:
+            _print_warn(
+                f"ffmpeg not found — skipping: {', '.join(_needs)}"
+            )
+            return pps
+
+    # SponsorBlock mark (chapters, no re-encode — must run first)
+    if getattr(args, "sponsorblock_mark", None):
+        cats = _parse_categories(args.sponsorblock_mark)
+        try:
+            pps.append(SponsorBlockPP(mode="mark", categories=cats))
+        except PostProcessorError as e:
+            _print_warn(str(e))
+
+    # SponsorBlock remove (re-encodes, so after mark)
+    if getattr(args, "sponsorblock_remove", None):
+        cats = _parse_categories(args.sponsorblock_remove)
+        try:
+            pps.append(SponsorBlockPP(mode="remove", categories=cats))
+        except PostProcessorError as e:
+            _print_warn(str(e))
+
+    # Subtitle embedding
+    if getattr(args, "embed_subs", False) and getattr(args, "caption_code", None):
+        try:
+            pps.append(EmbedSubtitlePostProcessor(lang_code=args.caption_code))
+        except PostProcessorError as e:
+            _print_warn(str(e))
+
+    # Audio extraction (format conversion)
+    if getattr(args, "extract_audio", False):
+        fmt = getattr(args, "audio_format", None) or "mp3"
+        try:
+            pps.append(AudioExtractor(format=fmt))
+        except PostProcessorError as e:
+            _print_warn(str(e))
+
+    # Thumbnail embedding
+    if getattr(args, "embed_thumbnail", False):
+        try:
+            pps.append(EmbedThumbnailPostProcessor())
+        except PostProcessorError as e:
+            _print_warn(str(e))
+
+    # Metadata embedding (last — captures any format changes from above)
+    if getattr(args, "embed_metadata", False):
+        try:
+            pps.append(FFmpegMetadataEmbedder())
+        except PostProcessorError as e:
+            _print_warn(str(e))
+
+    return pps
+
+
+def _run_pp_chain(pps: list, file_path: str, stream: Stream, youtube: YouTube) -> str:
+    """Run *pps* in sequence, threading the file path through each."""
+    current = file_path
+    for pp in pps:
+        try:
+            _print_section(f"Post-processing  {BWH}{pp.__class__.__name__}{R}")
+            current = pp.run(current, stream, youtube)
+        except PostProcessorError as exc:
+            _print_err(f"{pp.__class__.__name__} failed: {exc}")
+    return current
+
+
+# ── Output template resolution ────────────────────────────────────────────────
+
+def _resolve_output(
+    template: Optional[OutputTemplate],
+    youtube: YouTube,
+    stream: Stream,
+    base_dir: Optional[str],
+    playlist_index: Optional[int] = None,
+    playlist_title: Optional[str] = None,
+):
+    """Return (output_dir, filename) honouring the template (if any)."""
+    if template is None:
+        return base_dir, None
+
+    rendered = template.render(youtube, stream, playlist_index, playlist_title)
+    dir_part, file_part = os.path.split(rendered)
+
+    if dir_part:
+        out_dir = os.path.join(base_dir or ".", dir_part)
+        os.makedirs(out_dir, exist_ok=True)
+    else:
+        out_dir = base_dir
+
+    return out_dir, file_part or None
+
+
 # ── Download helpers ──────────────────────────────────────────────────────────
 
 def _download(
     stream: Stream,
     target: Optional[str] = None,
     filename: Optional[str] = None,
-) -> None:
+    pp_chain: Optional[list] = None,
+    youtube: Optional[YouTube] = None,
+) -> Optional[str]:
+    """Download *stream*, run post-processors, return the final file path."""
     _DL_STATE.clear()
     name = filename or stream.default_filename
     try:
@@ -240,11 +373,18 @@ def _download(
     file_path = stream.get_file_path(filename=filename, output_path=target)
     if stream.exists_at_path(file_path):
         _print_warn(f"Already exists at  {DM}{file_path}{R}")
-        return
+        if pp_chain and youtube:
+            file_path = _run_pp_chain(pp_chain, file_path, stream, youtube)
+        return file_path
 
-    stream.download(output_path=target, filename=filename)
+    file_path = stream.download(output_path=target, filename=filename)
     sys.stdout.write("\n")
     _print_ok(f"Saved to  {DM}{file_path}{R}")
+
+    if pp_chain and youtube:
+        file_path = _run_pp_chain(pp_chain, file_path, stream, youtube)
+
+    return file_path
 
 
 def _unique_name(base: str, subtype: str, media_type: str, target: str) -> str:
@@ -258,7 +398,13 @@ def _unique_name(base: str, subtype: str, media_type: str, target: str) -> str:
 
 # ── Download commands ─────────────────────────────────────────────────────────
 
-def download_by_itag(youtube: YouTube, itag: int, target: Optional[str] = None) -> None:
+def download_by_itag(
+    youtube: YouTube,
+    itag: int,
+    target: Optional[str] = None,
+    pp_chain: Optional[list] = None,
+    filename: Optional[str] = None,
+) -> Optional[str]:
     stream = youtube.streams.get_by_itag(itag)
     if stream is None:
         _print_err(f"No stream with itag {itag}. Available streams:")
@@ -266,14 +412,20 @@ def download_by_itag(youtube: YouTube, itag: int, target: Optional[str] = None) 
         sys.exit(1)
     youtube.register_on_progress_callback(on_progress)
     try:
-        _download(stream, target=target)
+        return _download(stream, target=target, filename=filename, pp_chain=pp_chain, youtube=youtube)
     except KeyboardInterrupt:
         sys.stdout.write("\n")
         _print_warn("Interrupted.")
         sys.exit(1)
 
 
-def download_by_resolution(youtube: YouTube, resolution: str, target: Optional[str] = None) -> None:
+def download_by_resolution(
+    youtube: YouTube,
+    resolution: str,
+    target: Optional[str] = None,
+    pp_chain: Optional[list] = None,
+    filename: Optional[str] = None,
+) -> Optional[str]:
     stream = youtube.streams.get_by_resolution(resolution)
     if stream is None:
         _print_err(f"No stream at {resolution}. Available streams:")
@@ -281,14 +433,19 @@ def download_by_resolution(youtube: YouTube, resolution: str, target: Optional[s
         sys.exit(1)
     youtube.register_on_progress_callback(on_progress)
     try:
-        _download(stream, target=target)
+        return _download(stream, target=target, filename=filename, pp_chain=pp_chain, youtube=youtube)
     except KeyboardInterrupt:
         sys.stdout.write("\n")
         _print_warn("Interrupted.")
         sys.exit(1)
 
 
-def download_highest_resolution_progressive(youtube: YouTube, target: Optional[str] = None) -> None:
+def download_highest_resolution_progressive(
+    youtube: YouTube,
+    target: Optional[str] = None,
+    pp_chain: Optional[list] = None,
+    filename: Optional[str] = None,
+) -> Optional[str]:
     youtube.register_on_progress_callback(on_progress)
     try:
         stream = youtube.streams.get_highest_resolution()
@@ -296,14 +453,20 @@ def download_highest_resolution_progressive(youtube: YouTube, target: Optional[s
         _print_err(f"Video unavailable: {err}")
         sys.exit(1)
     try:
-        _download(stream, target=target)
+        return _download(stream, target=target, filename=filename, pp_chain=pp_chain, youtube=youtube)
     except KeyboardInterrupt:
         sys.stdout.write("\n")
         _print_warn("Interrupted.")
         sys.exit(1)
 
 
-def download_audio(youtube: YouTube, filetype: str, target: Optional[str] = None) -> None:
+def download_audio(
+    youtube: YouTube,
+    filetype: str,
+    target: Optional[str] = None,
+    pp_chain: Optional[list] = None,
+    filename: Optional[str] = None,
+) -> Optional[str]:
     audio = (
         youtube.streams.filter(only_audio=True, subtype=filetype)
         .order_by("abr")
@@ -315,7 +478,7 @@ def download_audio(youtube: YouTube, filetype: str, target: Optional[str] = None
         sys.exit(1)
     youtube.register_on_progress_callback(on_progress)
     try:
-        _download(audio, target=target)
+        return _download(audio, target=target, filename=filename, pp_chain=pp_chain, youtube=youtube)
     except KeyboardInterrupt:
         sys.stdout.write("\n")
         _print_warn("Interrupted.")
@@ -339,7 +502,13 @@ def _print_available_captions(captions: CaptionQuery) -> None:
     sys.stdout.write(f"  {codes}\n")
 
 
-def ffmpeg_process(youtube: YouTube, resolution: str, target: Optional[str] = None) -> None:
+def ffmpeg_process(
+    youtube: YouTube,
+    resolution: str,
+    target: Optional[str] = None,
+    pp_chain: Optional[list] = None,
+    final_filename: Optional[str] = None,
+) -> Optional[str]:
     youtube.register_on_progress_callback(on_progress)
     target = target or os.getcwd()
 
@@ -372,13 +541,27 @@ def ffmpeg_process(youtube: YouTube, resolution: str, target: Optional[str] = No
         _print_err("No audio stream found.")
         sys.exit(1)
 
-    _ffmpeg_downloader(audio_stream=audio_stream, video_stream=video_stream, target=target)
+    return _ffmpeg_downloader(
+        audio_stream=audio_stream,
+        video_stream=video_stream,
+        target=target,
+        pp_chain=pp_chain,
+        youtube=youtube,
+        final_filename=final_filename,
+    )
 
 
-def _ffmpeg_downloader(audio_stream: Stream, video_stream: Stream, target: str) -> None:
-    base         = safe_filename(video_stream.title)
-    video_name   = _unique_name(base, video_stream.subtype, "video", target)
-    audio_name   = _unique_name(base, audio_stream.subtype, "audio", target)
+def _ffmpeg_downloader(
+    audio_stream: Stream,
+    video_stream: Stream,
+    target: str,
+    pp_chain: Optional[list] = None,
+    youtube: Optional[YouTube] = None,
+    final_filename: Optional[str] = None,
+) -> Optional[str]:
+    base       = safe_filename(video_stream.title)
+    video_name = _unique_name(base, video_stream.subtype, "video", target)
+    audio_name = _unique_name(base, audio_stream.subtype, "audio", target)
 
     _download(stream=video_stream, target=target, filename=video_name)
     _DL_STATE.clear()
@@ -386,7 +569,8 @@ def _ffmpeg_downloader(audio_stream: Stream, video_stream: Stream, target: str) 
 
     video_path = os.path.join(target, f"{video_name}.{video_stream.subtype}")
     audio_path = os.path.join(target, f"{audio_name}.{audio_stream.subtype}")
-    final_path = os.path.join(target, f"{base}.{video_stream.subtype}")
+    final_name = final_filename or f"{base}.{video_stream.subtype}"
+    final_path = os.path.join(target, final_name)
 
     _print_section("Merging with ffmpeg")
     subprocess.run(  # nosec
@@ -396,6 +580,11 @@ def _ffmpeg_downloader(audio_stream: Stream, video_stream: Stream, target: str) 
     os.unlink(video_path)
     os.unlink(audio_path)
     _print_ok(f"Merged to  {DM}{final_path}{R}")
+
+    if pp_chain and youtube:
+        final_path = _run_pp_chain(pp_chain, final_path, video_stream, youtube)
+
+    return final_path
 
 
 def build_playback_report(youtube: YouTube) -> None:
@@ -411,54 +600,170 @@ def build_playback_report(youtube: YouTube) -> None:
     _print_ok(f"Playback report saved to  {DM}{fp}{R}")
 
 
+def dump_json(youtube: YouTube) -> None:
+    """Print video metadata as JSON without downloading."""
+    try:
+        info = {
+            "id":           youtube.video_id,
+            "title":        youtube.title,
+            "author":       youtube.author,
+            "channel_id":   youtube.channel_id,
+            "channel_url":  youtube.channel_url,
+            "length":       youtube.length,
+            "views":        youtube.views,
+            "publish_date": youtube.publish_date.isoformat() if youtube.publish_date else None,
+            "description":  youtube.description,
+            "keywords":     youtube.keywords,
+            "thumbnail_url": youtube.thumbnail_url,
+            "watch_url":    youtube.watch_url,
+            "streams": [
+                {
+                    "itag":       s.itag,
+                    "mime_type":  s.mime_type,
+                    "resolution": s.resolution,
+                    "fps":        getattr(s, "fps", None),
+                    "abr":        s.abr,
+                    "filesize":   s.filesize_approx,
+                    "is_progressive": s.is_progressive,
+                }
+                for s in youtube.streams
+            ],
+        }
+    except Exception as exc:
+        _print_err(f"Failed to collect video info: {exc}")
+        sys.exit(1)
+
+    sys.stdout.write(json.dumps(info, indent=2, ensure_ascii=False) + "\n")
+
+
+# ── Sleep between downloads ───────────────────────────────────────────────────
+
+def _sleep_between(args) -> None:
+    lo = float(getattr(args, "sleep_interval", None) or 0)
+    hi = float(getattr(args, "max_sleep_interval", None) or lo)
+    if lo <= 0:
+        return
+    delay = random.uniform(lo, max(lo, hi))
+    _print_warn(f"Sleeping {delay:.1f}s before next download…")
+    time.sleep(delay)
+
+
 # ── Argument parsing ──────────────────────────────────────────────────────────
 
 def _parse_args(
     parser: argparse.ArgumentParser, args: Optional[List] = None
 ) -> argparse.Namespace:
+    # ── positional & version ─────────────────────────────────────────────────
     parser.add_argument("url", nargs="?", help="YouTube watch or playlist URL")
     parser.add_argument("--version", action="version", version=f"pyt {__version__}")
-    parser.add_argument("--itag", type=int, metavar="ITAG",
-                        help="Download the stream with this itag")
-    parser.add_argument("-r", "--resolution", metavar="RES",
-                        help="Download the stream at this resolution (e.g. 1080p)")
-    parser.add_argument("-l", "--list", action="store_true",
-                        help="List all available streams")
-    parser.add_argument("-a", "--audio", const="mp4", nargs="?", metavar="FMT",
-                        help="Download audio only (default format: mp4)")
-    parser.add_argument("-f", "--ffmpeg", const="best", nargs="?", metavar="RES",
-                        help="Download video+audio separately and merge with ffmpeg")
-    parser.add_argument("-c", "--caption-code", metavar="LANG",
-                        help="Download captions for the given language code (e.g. en)")
-    parser.add_argument("-lc", "--list-captions", action="store_true",
-                        help="List available caption language codes")
-    parser.add_argument("-t", "--target", metavar="DIR",
-                        help="Output directory (default: current directory)")
-    parser.add_argument("-v", "--verbose", action="store_true",
-                        help="Enable debug logging")
-    parser.add_argument("--logfile", metavar="FILE",
-                        help="Write log output to this file")
-    parser.add_argument("--build-playback-report", action="store_true",
-                        help="Save raw HTML/JS/vid-info to a gzip report for debugging")
+
+    # ── stream selection ──────────────────────────────────────────────────────
+    sel = parser.add_argument_group("stream selection")
+    sel.add_argument("--itag", type=int, metavar="ITAG",
+                     help="Download the stream with this itag")
+    sel.add_argument("-r", "--resolution", metavar="RES",
+                     help="Download the stream at this resolution (e.g. 1080p)")
+    sel.add_argument("-l", "--list", action="store_true",
+                     help="List all available streams")
+    sel.add_argument("-a", "--audio", const="mp4", nargs="?", metavar="FMT",
+                     help="Download audio only (default format: mp4)")
+    sel.add_argument("-f", "--ffmpeg", const="best", nargs="?", metavar="RES",
+                     help="Download video+audio separately and merge with ffmpeg")
+
+    # ── post-processing ───────────────────────────────────────────────────────
+    pp = parser.add_argument_group("post-processing")
+    pp.add_argument("-x", "--extract-audio", action="store_true",
+                    help="Extract audio after download (requires ffmpeg)")
+    pp.add_argument("--audio-format", metavar="FMT", default="mp3",
+                    help="Audio format for -x (mp3, m4a, aac, flac, opus, vorbis, wav, alac). Default: mp3")
+    pp.add_argument("--embed-metadata", action="store_true",
+                    help="Embed title, artist, date into the file (requires ffmpeg)")
+    pp.add_argument("--embed-thumbnail", action="store_true",
+                    help="Embed video thumbnail as cover art (requires ffmpeg)")
+    pp.add_argument("--embed-subs", action="store_true",
+                    help="Embed subtitles into video (use with -c; requires ffmpeg)")
+    pp.add_argument("--sponsorblock-mark", metavar="CATS",
+                    help='Mark SponsorBlock segments as chapters (e.g. "sponsor,intro" or "all")')
+    pp.add_argument("--sponsorblock-remove", metavar="CATS",
+                    help='Remove SponsorBlock segments (re-encodes video; e.g. "sponsor" or "all")')
+
+    # ── captions ─────────────────────────────────────────────────────────────
+    cap = parser.add_argument_group("captions")
+    cap.add_argument("-c", "--caption-code", metavar="LANG",
+                     help="Download captions for the given language code (e.g. en)")
+    cap.add_argument("-lc", "--list-captions", action="store_true",
+                     help="List available caption language codes")
+
+    # ── output ────────────────────────────────────────────────────────────────
+    out = parser.add_argument_group("output")
+    out.add_argument("-t", "--target", metavar="DIR",
+                     help="Output directory (default: current directory)")
+    out.add_argument("-o", "--output", metavar="TEMPLATE",
+                     help='Output filename template (e.g. "{title}.{ext}" or "{author}/{title}.{ext}"). Default: {title}.{ext}')
+    out.add_argument("-j", "--dump-json", action="store_true",
+                     help="Print video info as JSON without downloading")
+
+    # ── network ───────────────────────────────────────────────────────────────
+    net = parser.add_argument_group("network")
+    net.add_argument("--proxy", metavar="URL",
+                     help="Proxy URL (e.g. socks5://127.0.0.1:9050 or http://user:pass@host:port)")
+    net.add_argument("--cookies", metavar="FILE",
+                     help="Load cookies from a Netscape format file")
+    net.add_argument("--cookies-from-browser", metavar="BROWSER",
+                     help="Extract cookies from browser (chrome, firefox, brave, edge, safari)")
+    net.add_argument("--geo-bypass", action="store_true",
+                     help="Bypass geographic restrictions via a fake X-Forwarded-For header")
+    net.add_argument("--geo-bypass-country", metavar="CC",
+                     help="Two-letter country code for geo-bypass (e.g. US)")
+    net.add_argument("--sleep-interval", metavar="N", type=float,
+                     help="Sleep N seconds between downloads in batch/playlist mode")
+    net.add_argument("--max-sleep-interval", metavar="N", type=float,
+                     help="Max sleep (random interval between --sleep-interval and this)")
+
+    # ── batch ─────────────────────────────────────────────────────────────────
+    bat = parser.add_argument_group("batch")
+    bat.add_argument("--batch-file", metavar="FILE",
+                     help="Read URLs from FILE (one per line; # lines are comments)")
+    bat.add_argument("--download-archive", metavar="FILE",
+                     help="Skip already-downloaded videos; record new downloads to FILE")
+
+    # ── debug ─────────────────────────────────────────────────────────────────
+    dbg = parser.add_argument_group("debug")
+    dbg.add_argument("-v", "--verbose", action="store_true",
+                     help="Enable debug logging")
+    dbg.add_argument("--logfile", metavar="FILE",
+                     help="Write log output to this file")
+    dbg.add_argument("--build-playback-report", action="store_true",
+                     help="Save raw HTML/JS/vid-info to a gzip report for debugging")
+
     return parser.parse_args(args)
 
 
-# ── Entry point ───────────────────────────────────────────────────────────────
+# ── Single-video processing ───────────────────────────────────────────────────
 
-def _perform_args_on_youtube(youtube: YouTube, args: argparse.Namespace) -> None:
+def _perform_args_on_youtube(
+    youtube: YouTube,
+    args: argparse.Namespace,
+    archive: Optional[DownloadArchive] = None,
+    template: Optional[OutputTemplate] = None,
+    playlist_index: Optional[int] = None,
+    playlist_title: Optional[str] = None,
+) -> None:
+    # Archive check
+    if archive and archive.is_downloaded(youtube.video_id):
+        _print_warn(f"Skipping  {DM}{youtube.video_id}{R}  (already in archive)")
+        return
+
     no_action = not any([
-        args.list, args.list_captions, args.build_playback_report,
+        args.list, args.list_captions, args.build_playback_report, args.dump_json,
         args.itag, args.caption_code, args.resolution, args.audio, args.ffmpeg,
+        args.extract_audio,
     ])
 
     _show_video_info(youtube)
 
-    if no_action:
-        if shutil.which("ffmpeg"):
-            ffmpeg_process(youtube=youtube, resolution="best", target=args.target)
-        else:
-            _print_warn("ffmpeg not found — falling back to best progressive stream (max 720p)")
-            download_highest_resolution_progressive(youtube=youtube, target=args.target)
+    if args.dump_json:
+        dump_json(youtube)
         return
 
     if args.list:
@@ -468,16 +773,168 @@ def _perform_args_on_youtube(youtube: YouTube, args: argparse.Namespace) -> None
         _print_available_captions(youtube.captions)
     if args.build_playback_report:
         build_playback_report(youtube)
-    if args.itag:
-        download_by_itag(youtube=youtube, itag=args.itag, target=args.target)
-    if args.caption_code:
+
+    # Caption download (standalone, not post-processing)
+    if args.caption_code and not args.embed_subs:
         download_caption(youtube=youtube, lang_code=args.caption_code, target=args.target)
+
+    # Build post-processor chain once
+    pp_chain = _build_pp_chain(args)
+
+    def _resolve(stream):
+        if template is None:
+            return args.target, None
+        return _resolve_output(template, youtube, stream, args.target, playlist_index, playlist_title)
+
+    if args.itag:
+        if template:
+            s = youtube.streams.get_by_itag(args.itag)
+            out_dir, fname = _resolve(s) if s else (args.target, None)
+        else:
+            out_dir, fname = args.target, None
+        download_by_itag(youtube=youtube, itag=args.itag, target=out_dir, pp_chain=pp_chain, filename=fname)
+
     if args.resolution:
-        download_by_resolution(youtube=youtube, resolution=args.resolution, target=args.target)
+        if template:
+            s = youtube.streams.get_by_resolution(args.resolution)
+            out_dir, fname = _resolve(s) if s else (args.target, None)
+        else:
+            out_dir, fname = args.target, None
+        download_by_resolution(youtube=youtube, resolution=args.resolution, target=out_dir, pp_chain=pp_chain, filename=fname)
+
     if args.audio:
-        download_audio(youtube=youtube, filetype=args.audio, target=args.target)
+        if template:
+            s = youtube.streams.filter(only_audio=True, subtype=args.audio).order_by("abr").last()
+            out_dir, fname = _resolve(s) if s else (args.target, None)
+        else:
+            out_dir, fname = args.target, None
+        download_audio(youtube=youtube, filetype=args.audio, target=out_dir, pp_chain=pp_chain, filename=fname)
+
     if args.ffmpeg:
-        ffmpeg_process(youtube=youtube, resolution=args.ffmpeg, target=args.target)
+        if template:
+            vs = (
+                youtube.streams.filter(progressive=False, subtype="mp4").order_by("resolution").last()
+                or youtube.streams.filter(progressive=False).order_by("resolution").last()
+            )
+            out_dir, final_name = _resolve(vs) if vs else (args.target, None)
+        else:
+            out_dir, final_name = args.target, None
+        ffmpeg_process(
+            youtube=youtube, resolution=args.ffmpeg, target=out_dir,
+            pp_chain=pp_chain, final_filename=final_name,
+        )
+
+    if args.extract_audio and not args.audio and not args.ffmpeg and not args.resolution and not args.itag:
+        audio_stream = youtube.streams.filter(only_audio=True).order_by("abr").last()
+        if audio_stream is None:
+            _print_err("No audio stream found.")
+            sys.exit(1)
+        out_dir, fname = _resolve(audio_stream)
+        youtube.register_on_progress_callback(on_progress)
+        try:
+            _download(audio_stream, target=out_dir, filename=fname, pp_chain=pp_chain, youtube=youtube)
+        except KeyboardInterrupt:
+            sys.stdout.write("\n")
+            _print_warn("Interrupted.")
+            sys.exit(1)
+
+    if no_action:
+        if shutil.which("ffmpeg"):
+            if template:
+                vs = (
+                    youtube.streams.filter(progressive=False, subtype="mp4").order_by("resolution").last()
+                    or youtube.streams.filter(progressive=False).order_by("resolution").last()
+                )
+                out_dir, final_name = _resolve(vs) if vs else (args.target, None)
+            else:
+                out_dir, final_name = args.target, None
+            ffmpeg_process(
+                youtube=youtube, resolution="best", target=out_dir,
+                pp_chain=pp_chain, final_filename=final_name,
+            )
+        else:
+            _print_warn("ffmpeg not found — falling back to best progressive stream (max 720p)")
+            if template:
+                s = youtube.streams.get_highest_resolution()
+                out_dir, fname = _resolve(s) if s else (args.target, None)
+            else:
+                out_dir, fname = args.target, None
+            download_highest_resolution_progressive(
+                youtube=youtube, target=out_dir, pp_chain=pp_chain, filename=fname
+            )
+
+    # Mark as downloaded after all actions complete
+    if archive:
+        archive.mark_downloaded(youtube.video_id)
+
+
+# ── Entry point ───────────────────────────────────────────────────────────────
+
+def _iter_batch_urls(path: str) -> List[str]:
+    """Read URLs from a batch file (one per line, # comments stripped)."""
+    urls = []
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.split("#")[0].strip()
+            if line:
+                urls.append(line)
+    return urls
+
+
+def _setup_cookies(args) -> None:
+    """Install cookies into pyt's request layer if requested."""
+    if getattr(args, "cookies", None):
+        from pyt.cookies import install_cookies, load_cookies_from_file
+        try:
+            install_cookies(load_cookies_from_file(args.cookies))
+            _print_ok(f"Loaded cookies from  {DM}{args.cookies}{R}")
+        except Exception as exc:
+            _print_err(f"Failed to load cookies: {exc}")
+            sys.exit(1)
+    elif getattr(args, "cookies_from_browser", None):
+        from pyt.cookies import install_cookies, load_cookies_from_browser
+        try:
+            install_cookies(load_cookies_from_browser(args.cookies_from_browser))
+            _print_ok(f"Loaded cookies from  {DM}{args.cookies_from_browser}{R}")
+        except Exception as exc:
+            _print_err(f"Failed to load cookies from browser: {exc}")
+            sys.exit(1)
+
+
+def _setup_geo_bypass(args) -> None:
+    """Add X-Forwarded-For header for geo-bypass."""
+    if not getattr(args, "geo_bypass", False) and not getattr(args, "geo_bypass_country", None):
+        return
+
+    import ipaddress
+    import random as _random
+    from pyt import request
+
+    _COUNTRY_RANGES = {
+        "US": "104.16.0.0/12",
+        "GB": "185.86.0.0/16",
+        "CA": "99.228.0.0/16",
+        "AU": "1.120.0.0/13",
+        "DE": "80.128.0.0/11",
+    }
+    cc = (getattr(args, "geo_bypass_country", None) or "US").upper()
+    cidr = _COUNTRY_RANGES.get(cc, "104.16.0.0/12")
+    net = ipaddress.IPv4Network(cidr)
+    fake_ip = str(ipaddress.IPv4Address(
+        _random.randint(int(net.network_address), int(net.broadcast_address))
+    ))
+
+    _orig = request._execute_request
+
+    def _patched(url, method=None, headers=None, data=None, timeout=...):
+        h = dict(headers or {})
+        h["X-Forwarded-For"] = fake_ip
+        import socket
+        t = socket._GLOBAL_DEFAULT_TIMEOUT if ... is timeout else timeout
+        return _orig(url, method=method, headers=h, data=data, timeout=t)
+
+    request._execute_request = _patched
+    logger.debug("Geo-bypass active — spoofing IP: %s", fake_ip)
 
 
 def main() -> None:
@@ -493,24 +950,74 @@ def main() -> None:
         setup_logger(logging.DEBUG, log_filename=args.logfile)
         logger.debug("pyt %s", __version__)
 
-    if not args.url or "youtu" not in args.url:
+    # Merge config file values (CLI flags take precedence)
+    apply_config(args, load_config())
+
+    # Network setup
+    _setup_cookies(args)
+    _setup_geo_bypass(args)
+
+    # Proxy (proxies dict is passed per-YouTube instance below)
+    proxies = None
+    if getattr(args, "proxy", None):
+        proxies = {"http": args.proxy, "https": args.proxy}
+
+    # Archive
+    archive: Optional[DownloadArchive] = None
+    if getattr(args, "download_archive", None):
+        archive = DownloadArchive(args.download_archive)
+
+    # Output template
+    template: Optional[OutputTemplate] = None
+    if getattr(args, "output", None):
+        template = OutputTemplate(args.output)
+
+    # Collect URLs from positional arg and/or --batch-file
+    urls: List[str] = []
+    if getattr(args, "batch_file", None):
+        if not os.path.isfile(args.batch_file):
+            _print_err(f"Batch file not found: {args.batch_file}")
+            sys.exit(1)
+        urls.extend(_iter_batch_urls(args.batch_file))
+
+    if args.url:
+        if "youtu" not in args.url:
+            parser.print_help()
+            sys.exit(1)
+        urls.append(args.url)
+
+    if not urls:
         parser.print_help()
         sys.exit(1)
 
-    if "/playlist" in args.url:
-        sys.stdout.write(f"\n  {DM}Loading playlist …{R}\n")
-        playlist = Playlist(args.url)
-        if not args.target:
-            args.target = safe_filename(playlist.title)
-        for video in playlist.videos:
-            try:
-                _perform_args_on_youtube(video, args)
-            except exceptions.PytError as exc:
-                _print_err(f"{video.watch_url}  —  {exc}")
-    else:
-        sys.stdout.write(f"\n  {DM}Fetching  {args.url} …{R}\n")
-        youtube = YouTube(args.url)
-        _perform_args_on_youtube(youtube, args)
+    first = True
+    for url in urls:
+        if not first:
+            _sleep_between(args)
+        first = False
+
+        if "/playlist" in url:
+            sys.stdout.write(f"\n  {DM}Loading playlist …{R}\n")
+            playlist = Playlist(url)
+            playlist_title = getattr(playlist, "title", None)
+            if not args.target and not template:
+                args.target = safe_filename(playlist_title or "playlist")
+            for idx, video in enumerate(playlist.videos, start=1):
+                try:
+                    _perform_args_on_youtube(
+                        video, args, archive=archive, template=template,
+                        playlist_index=idx, playlist_title=playlist_title,
+                    )
+                except exceptions.PytError as exc:
+                    _print_err(f"{video.watch_url}  —  {exc}")
+                if idx < len(list(playlist.video_urls)):
+                    _sleep_between(args)
+        else:
+            sys.stdout.write(f"\n  {DM}Fetching  {url} …{R}\n")
+            youtube = YouTube(url, proxies=proxies)
+            _perform_args_on_youtube(
+                youtube, args, archive=archive, template=template,
+            )
 
 
 if __name__ == "__main__":
