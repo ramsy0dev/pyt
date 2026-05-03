@@ -331,17 +331,19 @@ class Stream:
                     # send to the on_progress callback.
                     self.on_progress(chunk, fh, bytes_remaining)
             except HTTPError as e:
-                if e.code != 404:
+                if e.code not in (403, 404):
                     raise
-                # Some adaptive streams need to be requested with sequence numbers
+                # Byte-range requests not supported — reset and retry with
+                # sequential segment requests (sq= parameter).
+                fh.seek(0)
+                fh.truncate()
+                bytes_remaining = self.filesize
                 for chunk in request.seq_stream(
                     self.url,
                     timeout=timeout,
                     max_retries=max_retries
                 ):
-                    # reduce the (bytes) remainder by the length of the chunk.
                     bytes_remaining -= len(chunk)
-                    # send to the on_progress callback.
                     self.on_progress(chunk, fh, bytes_remaining)
         self.on_complete(file_path)
         return file_path
