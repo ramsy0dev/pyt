@@ -513,8 +513,13 @@ def ffmpeg_process(
     youtube.register_on_progress_callback(on_progress)
     target = target or os.getcwd()
 
+    _is_avc = [lambda s: s.video_codec and s.video_codec.startswith("avc")]
+
     if resolution == "best":
-        video_stream = (
+        # Find the best resolution available, then prefer H.264 (avc1) at that
+        # resolution — H.264 streams are fully cached across YouTube's CDN while
+        # AV1/VP9 streams may be served from cache only for low-view videos.
+        _best = (
             youtube.streams.filter(progressive=False, subtype="mp4")
             .order_by("resolution")
             .last()
@@ -523,9 +528,23 @@ def ffmpeg_process(
             .order_by("resolution")
             .last()
         )
+        if _best:
+            video_stream = (
+                youtube.streams.filter(
+                    progressive=False, subtype="mp4",
+                    resolution=_best.resolution,
+                    custom_filter_functions=_is_avc,
+                ).first()
+            ) or _best
+        else:
+            video_stream = None
     else:
         video_stream = (
-            youtube.streams.filter(progressive=False, resolution=resolution, subtype="mp4").first()
+            youtube.streams.filter(
+                progressive=False, resolution=resolution, subtype="mp4",
+                custom_filter_functions=_is_avc,
+            ).first()
+            or youtube.streams.filter(progressive=False, resolution=resolution, subtype="mp4").first()
             or youtube.streams.filter(progressive=False, resolution=resolution).first()
         )
 

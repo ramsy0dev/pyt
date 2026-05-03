@@ -6,7 +6,7 @@ import socket
 import http.client
 
 from urllib import parse
-from urllib.error import URLError
+from urllib.error import URLError, HTTPError
 from urllib.request import (
     Request,
     urlopen
@@ -148,13 +148,13 @@ def stream(
     """
     file_size: int = default_range_size  # fake filesize to start
     downloaded = 0
-    # After the first chunk we pin to the post-redirect CDN URL so that
-    # subsequent range requests don't re-trigger the 302 → CDN handshake,
-    # which YouTube only allows once per stream URL.
     cdn_url = url
+    # YouTube CDN enforces per-request range size limits that vary by client
+    # type and byte offset. Start at the default and halve on 403 to adapt.
+    range_size = default_range_size
 
     while downloaded < file_size:
-        stop_pos = min(downloaded + default_range_size, file_size) - 1
+        stop_pos = min(downloaded + range_size, file_size) - 1
         tries = 0
 
         while True:
@@ -168,9 +168,14 @@ def stream(
                     headers={"Range": f"bytes={downloaded}-{stop_pos}"},
                     timeout=timeout
                 )
-                # Pin to the final CDN URL after the first successful redirect
                 if cdn_url == url:
                     cdn_url = response.geturl()
+            except HTTPError as e:
+                if e.code == 403 and range_size > 524288:
+                    range_size //= 2
+                    stop_pos = min(downloaded + range_size, file_size) - 1
+                    continue  # retry with smaller chunk; don't count as a try
+                raise
             except URLError as e:
                 if isinstance(e.reason, socket.timeout):
                     pass

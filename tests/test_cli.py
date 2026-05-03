@@ -343,6 +343,8 @@ def test_ffmpeg_process_best_should_download(  # noqa: PT019
     streams.filter.return_value.order_by.return_value.last.return_value = (
         video_stream
     )
+    # No H.264 stream found at best resolution → falls back to video_stream
+    streams.filter.return_value.first.return_value = None
     audio_stream = MagicMock()
     streams.get_audio_only.return_value = audio_stream
     # When
@@ -403,6 +405,8 @@ def test_ffmpeg_process_audio_none_should_fallback_download(  # noqa: PT019
     youtube.streams = streams
     stream = MagicMock()
     streams.filter.return_value.order_by.return_value.last.return_value = stream
+    # No H.264 stream found at best resolution → falls back to stream
+    streams.filter.return_value.first.return_value = None
     streams.get_audio_only.return_value = None
     # When
     cli.ffmpeg_process(youtube, "best", target)
