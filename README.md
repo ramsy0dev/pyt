@@ -5,6 +5,11 @@
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://python.org)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
+> **Heads-up:** SABR support is still under active development. Some videos
+> won't download yet, others will be slow or 403 partway through. If a download
+> fails, that's why. See [Why downloads break sometimes (SABR)](#why-downloads-break-sometimes-sabr)
+> for the full story.
+
 A maintained pytube fork. The original went unmaintained while YouTube's API
 kept changing. Everything that was broken has been fixed, and a full
 post-processing pipeline has been added so pyt can hold its own against yt-dlp
