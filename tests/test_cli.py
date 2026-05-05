@@ -440,39 +440,80 @@ def test_ffmpeg_process_audio_fallback_none_should_exit(  # noqa: PT019
     _ffmpeg_downloader.assert_not_called()
 
 @mock.patch("pyt.cli.os.unlink", return_value=None)
-@mock.patch("pyt.cli.subprocess.run", return_value=None)
+@mock.patch("pyt.cli.shutil.which", return_value="/usr/bin/ffmpeg")
+@mock.patch("pyt.cli.subprocess.run")
 @mock.patch("pyt.cli._download", return_value=None)
 @mock.patch("pyt.cli._unique_name", return_value=None)
-def test_ffmpeg_downloader(unique_name, download, run, unlink):
-    # Given
+def test_ffmpeg_downloader(unique_name, download, run, _which, unlink):
+    # Given: avc1 video + aac audio → merge container should be mp4
     target = "target"
     audio_stream = MagicMock()
+    audio_stream.subtype = "m4a"
+    audio_stream.audio_codec = "mp4a.40.2"
     video_stream = MagicMock()
     video_stream.id = "video_id"
-    audio_stream.subtype = "audio_subtype"
-    video_stream.subtype = "video_subtype"
+    video_stream.subtype = "mp4"
+    video_stream.video_codec = "avc1.640028"
     unique_name.side_effect = ["video_name", "audio_name"]
+    run.return_value = mock.Mock(returncode=0, stderr=b"")
 
     # When
     cli._ffmpeg_downloader(
         audio_stream=audio_stream, video_stream=video_stream, target=target
     )
+
     # Then
     download.assert_called()
-    run.assert_called_with(
-        [
-            "ffmpeg",
-            "-i",
-            os.path.join("target", "video_name.video_subtype"),
-            "-i",
-            os.path.join("target", "audio_name.audio_subtype"),
-            "-codec",
-            "copy",
-            os.path.join("target", "safe_title.video_subtype"),
-        ],
-        check=False,
-    )
-    unlink.assert_called()
+    args, kwargs = run.call_args
+    cmd = args[0]
+    assert cmd[0] == "/usr/bin/ffmpeg"
+    assert "-map" in cmd and "0:v:0" in cmd and "1:a:0" in cmd
+    assert "-c:v" in cmd and "-c:a" in cmd
+    assert "+faststart" in cmd  # mp4 container → faststart enabled
+    assert cmd[-1] == os.path.join("target", "safe_title.mp4")
+    assert kwargs.get("check") is False
+    assert kwargs.get("capture_output") is True
+    # Sources must be unlinked on success (video + audio).
+    assert unlink.call_count >= 2
+
+
+@mock.patch("pyt.cli.os.unlink", return_value=None)
+@mock.patch("pyt.cli.shutil.which", return_value="/usr/bin/ffmpeg")
+@mock.patch("pyt.cli.subprocess.run")
+@mock.patch("pyt.cli._download", return_value=None)
+@mock.patch("pyt.cli._unique_name", return_value=None)
+def test_ffmpeg_downloader_failure_keeps_sources(unique_name, download, run, _which, unlink):
+    """If ffmpeg fails, the sources must NOT be deleted — user can retry."""
+    audio_stream = MagicMock()
+    audio_stream.subtype = "m4a"
+    audio_stream.audio_codec = "mp4a.40.2"
+    video_stream = MagicMock()
+    video_stream.subtype = "mp4"
+    video_stream.video_codec = "avc1.640028"
+    unique_name.side_effect = ["video_name", "audio_name"]
+    run.return_value = mock.Mock(returncode=1, stderr=b"some ffmpeg error")
+
+    with pytest.raises(SystemExit):
+        cli._ffmpeg_downloader(
+            audio_stream=audio_stream, video_stream=video_stream, target="target"
+        )
+    # Sources must be intact on failure.
+    unlink.assert_not_called()
+
+
+def test_pick_merge_container():
+    avc_stream = MagicMock(video_codec="avc1.64001f")
+    av1_stream = MagicMock(video_codec="av01.0.05M.08")
+    vp9_stream = MagicMock(video_codec="vp09.00.50.08")
+    aac_stream = MagicMock(audio_codec="mp4a.40.2")
+    opus_stream = MagicMock(audio_codec="opus")
+
+    assert cli._pick_merge_container(avc_stream, aac_stream) == "mp4"
+    assert cli._pick_merge_container(av1_stream, aac_stream) == "mp4"
+    assert cli._pick_merge_container(vp9_stream, opus_stream) == "webm"
+    # Cross-family combos must fall back to the safe container.
+    assert cli._pick_merge_container(vp9_stream, aac_stream) == "mkv"
+    assert cli._pick_merge_container(avc_stream, opus_stream) == "mkv"
 
 @mock.patch("pyt.cli.download_audio")
 @mock.patch("pyt.cli.YouTube.__init__", return_value=None)

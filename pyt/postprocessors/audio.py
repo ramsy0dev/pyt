@@ -2,9 +2,12 @@
 from __future__ import annotations
 
 import os
+import logging
 from typing import Optional, TYPE_CHECKING
 
 from pyt.postprocessors.ffmpeg import FFmpegPostProcessor, PostProcessorError
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from pyt.streams import Stream
@@ -52,7 +55,7 @@ class AudioExtractor(FFmpegPostProcessor):
         self._quality = quality
 
     def run(self, file_path: str, stream: "Stream", youtube: "YouTube") -> str:
-        base, original_ext = os.path.splitext(file_path)
+        base, _original_ext = os.path.splitext(file_path)
         out_path = base + self._ext
 
         tmp = self._temp_path(file_path, self._ext)
@@ -62,8 +65,13 @@ class AudioExtractor(FFmpegPostProcessor):
         args.append(tmp)
         self._run_ffmpeg(args)
 
-        os.unlink(file_path)
-        if os.path.exists(out_path):
-            os.unlink(out_path)
+        # Move the converted file into place atomically BEFORE deleting the
+        # source. os.replace is atomic on POSIX and best-effort atomic on
+        # Windows; either way it's safer than unlink-then-replace.
         os.replace(tmp, out_path)
+        if os.path.abspath(file_path) != os.path.abspath(out_path):
+            try:
+                os.unlink(file_path)
+            except OSError as e:
+                logger.warning("could not remove original %s: %s", file_path, e)
         return out_path

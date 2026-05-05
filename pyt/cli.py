@@ -627,22 +627,91 @@ def _ffmpeg_downloader(
     _download(stream=audio_stream, target=target, filename=audio_filename)
 
     audio_path = os.path.join(target, audio_filename)
-    final_name = final_filename or f"{base}.{video_stream.subtype}"
-    final_path = os.path.join(target, final_name)
+
+    # Pick a container that actually accepts both codecs. Without this, a
+    # vp9+m4a or avc1+opus combo silently produces a broken file because
+    # `-codec copy` can't transmux into an incompatible container.
+    merge_ext = _pick_merge_container(video_stream, audio_stream)
+    if final_filename:
+        # Caller asked for a specific filename. If the requested extension is
+        # incompatible with the codecs, rewrite it to the safe one — the
+        # alternative is producing a "playable file" that isn't.
+        stem, ext = os.path.splitext(final_filename)
+        if ext.lstrip(".").lower() != merge_ext:
+            final_filename = f"{stem}.{merge_ext}"
+    else:
+        final_filename = f"{base}.{merge_ext}"
+    final_path = os.path.join(target, final_filename)
 
     _print_section("Merging with ffmpeg")
-    subprocess.run(  # nosec
-        ["ffmpeg", "-i", video_path, "-i", audio_path, "-codec", "copy", final_path],
-        check=False,
-    )
-    os.unlink(video_path)
-    os.unlink(audio_path)
+    ffmpeg_bin = shutil.which("ffmpeg")
+    if not ffmpeg_bin:
+        _print_err("ffmpeg not found on PATH; cannot merge.")
+        sys.exit(1)
+    cmd = [
+        ffmpeg_bin, "-y",
+        "-loglevel", "warning", "-nostats",
+        "-i", video_path,
+        "-i", audio_path,
+        "-map", "0:v:0",
+        "-map", "1:a:0",
+        "-c:v", "copy",
+        "-c:a", "copy",
+    ]
+    if merge_ext == "mp4":
+        cmd += ["-movflags", "+faststart"]
+    cmd.append(final_path)
+
+    result = subprocess.run(cmd, capture_output=True, check=False)  # nosec
+    if result.returncode != 0:
+        # Leave the source files behind so the user can retry / inspect.
+        _print_err(
+            f"ffmpeg merge failed (exit {result.returncode}):\n"
+            + result.stderr.decode("utf-8", errors="replace")
+        )
+        if os.path.exists(final_path):
+            try:
+                os.unlink(final_path)
+            except OSError:
+                pass
+        sys.exit(1)
+
+    # Merge succeeded — now safe to drop sources.
+    for p in (video_path, audio_path):
+        try:
+            os.unlink(p)
+        except OSError as e:
+            logger.warning("could not delete %s: %s", p, e)
     _print_ok(f"Merged to  {DM}{final_path}{R}")
 
     if pp_chain and youtube:
         final_path = _run_pp_chain(pp_chain, final_path, video_stream, youtube)
 
     return final_path
+
+
+def _pick_merge_container(video_stream: Stream, audio_stream: Stream) -> str:
+    """Pick the right container for muxing *video_stream* and *audio_stream*.
+
+    YouTube serves video as one of: avc1 (H.264) in mp4, vp9 in webm, av01 in mp4.
+    Audio: mp4a/aac in m4a, opus in webm.
+    `-codec copy` requires the container to accept both codecs. mp4 takes
+    avc1+aac and av01+aac; webm takes vp9+opus. mkv accepts everything and is
+    the safe fallback for cross-family combinations.
+    """
+    v = (video_stream.video_codec or "").lower()
+    a = (audio_stream.audio_codec or "").lower()
+    is_avc = v.startswith("avc")
+    is_av1 = v.startswith("av01") or v.startswith("av1")
+    is_vp9 = v.startswith("vp9") or v.startswith("vp09")
+    is_aac = a.startswith("mp4a") or a.startswith("aac")
+    is_opus = a.startswith("opus")
+
+    if (is_avc or is_av1) and is_aac:
+        return "mp4"
+    if is_vp9 and is_opus:
+        return "webm"
+    return "mkv"
 
 
 def build_playback_report(youtube: YouTube) -> None:
