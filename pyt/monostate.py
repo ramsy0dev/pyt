@@ -27,3 +27,6 @@ class Monostate:
         self.refresh_sabr_config: Optional[Callable[[], None]] = None
         # Extra headers to use for CDN stream requests (e.g. client User-Agent).
         self.stream_headers: dict = {}
+        # ClientInfo subset embedded in SABR's StreamerContext message
+        # (clientName int, clientVersion, deviceMake/Model, osName/Version, userAgent).
+        self.client_info: dict = {}

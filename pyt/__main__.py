@@ -261,9 +261,15 @@ class YouTube:
         _yt = self
 
         def _refresh_sabr_config():
-            _yt._vid_info = None  # force player re-fetch on next access
+            """Force a fresh player response and return the new (sabr_url, ustreamer_config).
+
+            Used by both the legacy code path (Stream.download fallback) and by
+            SabrSession's refresh_callback when a single-use SABR token expires.
+            """
+            _yt._vid_info = None
             _ms.sabr_url = _yt.sabr_url
             _ms.ustreamer_config = _yt.ustreamer_config
+            return _ms.sabr_url, _ms.ustreamer_config
 
         self.stream_monostate.refresh_sabr_config = _refresh_sabr_config
 
@@ -300,6 +306,34 @@ class YouTube:
             elif status == 'LIVE_STREAM':
                 raise exceptions.LiveStreamError(video_id=self.video_id)
     
+    @staticmethod
+    def _build_client_info(client: str, cfg: dict, visitor_data: Optional[str] = None) -> dict:
+        """Translate an InnerTube client config into the SABR StreamerContext.ClientInfo dict.
+
+        Field mapping mirrors yt-dlp's innertube/client_info.py (ClientName enum at 16,
+        device_make at 12, device_model at 13, visitor_data at 14, user_agent at 15,
+        client_version at 17, os_name at 18, os_version at 19).
+        """
+        ctx = (cfg.get('context') or {}).get('client') or {}
+        header = cfg.get('header') or {}
+        client_name_int = header.get('X-Youtube-Client-Name')
+        try:
+            client_name_int = int(client_name_int) if client_name_int else None
+        except (TypeError, ValueError):
+            client_name_int = None
+        return {
+            'hl':              ctx.get('hl'),
+            'gl':              ctx.get('gl'),
+            'visitor_data':    ctx.get('visitorData') or visitor_data,
+            'client_name':     client_name_int,
+            'client_version':  ctx.get('clientVersion'),
+            'device_make':     ctx.get('deviceMake'),
+            'device_model':    ctx.get('deviceModel'),
+            'os_name':         ctx.get('osName'),
+            'os_version':      ctx.get('osVersion'),
+            'user_agent':      ctx.get('userAgent') or header.get('User-Agent'),
+        }
+
     @property
     def _visitor_data(self) -> Optional[str]:
         """Extract visitorData from the watch page for use in innertube requests."""
@@ -357,7 +391,9 @@ class YouTube:
                 if status == 'OK' and 'streamingData' in response:
                     logger.debug("player data from %s client", client)
                     self._vid_info = response
-                    self.stream_monostate.stream_headers = _default_clients.get(client, {}).get('header', {})
+                    cfg = _default_clients.get(client, {})
+                    self.stream_monostate.stream_headers = cfg.get('header', {})
+                    self.stream_monostate.client_info = self._build_client_info(client, cfg, visitor_data)
                     return self._vid_info
             except Exception:
                 pass

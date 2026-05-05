@@ -220,6 +220,8 @@ def sabr_stream(
     filesize: int = 0,
     duration_ms: int = 0,
     already_downloaded: int = 0,
+    client_info=None,
+    refresh_callback=None,
     timeout=socket._GLOBAL_DEFAULT_TIMEOUT,
 ):
     """Stream media bytes via YouTube's SABR protocol.
@@ -229,9 +231,11 @@ def sabr_stream(
     :param bytes ustreamer_config: Raw videoPlaybackUstreamerConfig bytes.
     :param str po_token: Optional proof-of-origin token (base64url).
     :param bool is_video: True for video streams, False for audio.
-    :param int filesize: Total stream size in bytes (for player-time progression).
-    :param int duration_ms: Video duration in milliseconds (for player-time progression).
+    :param int filesize: Total stream size in bytes.
+    :param int duration_ms: Video duration in milliseconds.
     :param int already_downloaded: Bytes already on disk (resume offset).
+    :param dict client_info: ClientInfo subset (clientName/Version/etc.) embedded in StreamerContext.
+    :param callable refresh_callback: () -> (new_sabr_url, new_ustreamer_config) for token refresh.
     :rtype: Iterable[bytes]
     """
     from pyt.sabr.client import SabrClient
@@ -244,6 +248,8 @@ def sabr_stream(
         filesize=filesize,
         duration_ms=duration_ms,
         already_downloaded=already_downloaded,
+        client_info=client_info,
+        refresh_callback=refresh_callback,
     ).stream(timeout=timeout)
 
 

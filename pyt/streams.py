@@ -326,6 +326,9 @@ class Stream:
         bytes_remaining = known_filesize
         logger.debug(f'downloading ({bytes_remaining} total bytes) file to {file_path}')
 
+        client_info     = self._monostate.client_info
+        refresh_cb      = self._monostate.refresh_sabr_config
+
         with open(file_path, "wb") as fh:
             if sabr_url:
                 try:
@@ -337,6 +340,8 @@ class Stream:
                         is_video=(self.type == 'video'),
                         filesize=known_filesize,
                         duration_ms=(self._monostate.duration or 0) * 1000,
+                        client_info=client_info,
+                        refresh_callback=refresh_cb,
                         timeout=timeout,
                     ):
                         bytes_remaining = max(0, bytes_remaining - len(chunk))
@@ -350,40 +355,13 @@ class Stream:
                     if bytes_remaining == 0:
                         self.on_complete(file_path)
                         return file_path
-                    # SABR token is single-use. Get fresh credentials and retry
-                    # from where we left off, without truncating the file.
+                    # Session terminated cleanly but didn't deliver everything;
+                    # finish via byte-range from where SABR stopped.
                     sabr_offset = known_filesize - bytes_remaining
                     logger.warning(
-                        'SABR incomplete (%d bytes remaining), refreshing token and retrying',
+                        'SABR incomplete (%d bytes remaining); finishing with range request',
                         bytes_remaining,
                     )
-                    refresh = self._monostate.refresh_sabr_config
-                    if refresh and sabr_offset > 0:
-                        try:
-                            refresh()
-                            new_sabr_url = self._monostate.sabr_url
-                            new_cfg = self._monostate.ustreamer_config
-                            if new_sabr_url and new_cfg:
-                                for chunk in request.sabr_stream(
-                                    new_sabr_url,
-                                    self.itag,
-                                    ustreamer_config=new_cfg,
-                                    po_token=po_token,
-                                    is_video=(self.type == 'video'),
-                                    filesize=known_filesize,
-                                    duration_ms=(self._monostate.duration or 0) * 1000,
-                                    already_downloaded=sabr_offset,
-                                    timeout=timeout,
-                                ):
-                                    bytes_remaining = max(0, bytes_remaining - len(chunk))
-                                    self.on_progress(chunk, fh, bytes_remaining)
-                                if bytes_remaining == 0:
-                                    self.on_complete(file_path)
-                                    return file_path
-                                logger.warning('SABR refresh still incomplete, trying range from offset')
-                        except Exception as exc:
-                            logger.warning('SABR refresh failed (%s), trying range from offset', exc)
-                    # Try range request from SABR offset (don't truncate yet).
                     try:
                         for chunk in request.stream(
                             self.url,
@@ -399,7 +377,6 @@ class Stream:
                     except HTTPError as e:
                         if e.code not in (403, 404):
                             raise
-                        # Range-from-offset also failed; restart from scratch.
                         fh.seek(0)
                         fh.truncate()
                         bytes_remaining = self.filesize

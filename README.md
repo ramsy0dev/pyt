@@ -208,6 +208,72 @@ for video in p.videos:
 
 ---
 
+## Why downloads break sometimes (SABR)
+
+YouTube has been rolling out SABR ("Server Adaptive Bitrate Request") for a
+while now. Instead of handing your player a signed CDN URL and letting it pull
+bytes with a normal `Range:` request, the server hands you a `serverAbrStreamingUrl`
+and expects you to POST a protobuf describing what you've already buffered, on
+which it streams back a binary UMP response with the next chunk it feels like
+giving you. The protocol is undocumented, the server holds back delivery
+based on player-time/readahead heuristics, and it's the official direction —
+fewer and fewer client variants still get plain signed URLs.
+
+What this means in practice:
+
+- **Some videos download fine, others crawl or 403.** That's the SABR rollout
+  hitting different itag/client combinations.
+- **The `ANDROID_VR` client at version ≤1.65** is the current "give me real
+  URLs" loophole, and it's the priority client here. When Google closes that
+  (they will), there's no escape from SABR.
+- **Slow downloads ≠ your network.** SABR's readahead throttle is real —
+  server says "wait 8 seconds" between chunks, you wait, the file lands at
+  approximately playback speed. We work around this by lying about the
+  player's position so the server stops throttling.
+
+### What I'm doing about it
+
+There's a real SABR implementation under [pyt/sabr/](pyt/sabr/). It's modeled
+after [yt-dlp's PR #13515](https://github.com/yt-dlp/yt-dlp/pull/13515) (massive
+thanks to coletdjnz for reverse-engineering the wire format). It currently
+handles:
+
+- The full UMP part taxonomy — `MEDIA_HEADER`, `MEDIA`, `MEDIA_END`,
+  `NEXT_REQUEST_POLICY`, `FORMAT_INITIALIZATION_METADATA`, `SABR_REDIRECT`,
+  `SABR_ERROR`, `STREAM_PROTECTION_STATUS`, `SABR_CONTEXT_UPDATE` /
+  `SABR_CONTEXT_SENDING_POLICY`, `SABR_SEEK`.
+- Audio + video multiplex on one session via `header_id → itag` demux.
+- Segment-aligned `BufferedRange` (start/end segment indices), not byte-fraction
+  guesswork.
+- Proper `StreamerContext` with full `ClientInfo`, PO token, playback cookie,
+  and the SABR contexts the server tells you to echo back (this is the
+  unskippable-ad enforcement channel).
+- `player_time_ms` set forward to the buffered edge so the server stops
+  throttling.
+- Backoff cap outside ad windows. Ad-scoped backoffs are honored in full.
+- Token refresh, redirect follow, retry/backoff on transport errors.
+
+What's missing / works but not great:
+
+- **PO token.** Required by some accounts for some videos. We can ship it if
+  you have one; we can't generate it (BotGuard attestation runs in a real
+  browser). Long-term plan: vendor a generator like `bgutil-pot`. For now: if
+  you hit `ATTESTATION_REQUIRED`, pass `po_token=...` to `YouTube(...)` and
+  it'll work.
+- **Live streams.** Metadata yes, downloads no. SABR live needs `SABR_SEEK` /
+  `LIVE_METADATA` handling we haven't wired up.
+- **Multi-format download orchestrator.** SabrSession can multiplex but
+  `Stream.download()` still opens one session per stream. Fixing this is
+  next on the list — see ADR notes in commits.
+- **Tests on recorded UMP fixtures.** Coming. For now SABR is exercised by
+  end-to-end downloads only, which means failures land in your terminal first.
+
+If something downloads slow or 403s, file an issue with the URL and your
+client (anonymized — no account info needed). I do this in spare time so
+turnaround is days-to-weeks, not hours.
+
+---
+
 ## Known limitations
 
 - **Age-restricted videos** — the bypass works for most, but tier-3
