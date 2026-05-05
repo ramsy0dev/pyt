@@ -274,7 +274,7 @@ def test_download_with_playlist_video_error(
     # Then
     playlist.assert_called()
     captured = capsys.readouterr()
-    assert "✗" in captured.out
+    assert " x " in captured.out
 
 @mock.patch("pyt.cli.YouTube")
 @mock.patch("pyt.StreamQuery")

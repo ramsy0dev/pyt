@@ -67,10 +67,10 @@ def _print_info(label: str, value: str) -> None:
     sys.stdout.write(f"  {B}{BWH}{label:<{pad}}{R}  {value}\n")
 
 def _print_ok(msg: str) -> None:
-    sys.stdout.write(f"\n  {BGN}✓{R}  {msg}\n")
+    sys.stdout.write(f"\n  {BGN}+{R}  {msg}\n")
 
 def _print_err(msg: str) -> None:
-    sys.stdout.write(f"\n  {BRD}✗{R}  {msg}\n")
+    sys.stdout.write(f"\n  {BRD}x{R}  {msg}\n")
 
 def _print_warn(msg: str) -> None:
     sys.stdout.write(f"  {BYL}!{R}  {msg}\n")
