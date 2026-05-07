@@ -20,13 +20,8 @@ classifiers = [
 
 [tool.poetry.dependencies]
 python = ">=3.10,<4.0"
-mutagen = {version = ">=1.47.0", optional = true}
-browser-cookie3 = {version = ">=0.20.1", optional = true}
-
-[tool.poetry.extras]
-metadata = ["mutagen"]
-cookies  = ["browser-cookie3"]
-all      = ["mutagen", "browser-cookie3"]
+mutagen = ">=1.47.0"
+browser-cookie3 = ">=0.20.1"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^9.0.3"
@@ -45,6 +40,13 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+filterwarnings = [
+    # Legacy tests intentionally exercise the deprecated YouTube/Playlist/etc.
+    # surface. Silence those warnings here so the suite stays readable; the
+    # new-API tests in tests/test_api.py validate the modern path explicitly
+    # via pytest.warns, which works regardless of this filter.
+    "ignore::DeprecationWarning",
+]
 
 [tool.mypy]
 python_version = "3.10"

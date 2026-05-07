@@ -2,6 +2,7 @@
 """Module for interacting with a user's youtube channel."""
 import json
 import logging
+import warnings
 
 from typing import (
     Dict,
@@ -20,6 +21,12 @@ from pyt.helpers import uniqueify
 logger = logging.getLogger(__name__)
 
 class Channel(Playlist):
+    """A YouTube channel feed.
+
+    .. deprecated::
+        Use :meth:`pyt.Client.channel` instead.
+    """
+
     def __init__(self, url: str, proxies: Optional[Dict[str, str]] = None):
         """Construct a :class:`Channel <Channel>`.
 
@@ -28,7 +35,14 @@ class Channel(Playlist):
         :param proxies:
             (Optional) A dictionary of proxies to use for web requests.
         """
-        super().__init__(url, proxies)
+        warnings.warn(
+            "pyt.Channel is deprecated. Use pyt.Client().channel(url) instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            super().__init__(url, proxies)
         
          # Removes paths that comes after the channel handle.
         if "channel" not in url:

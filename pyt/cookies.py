@@ -5,6 +5,8 @@ import http.cookiejar
 import logging
 import os
 
+import browser_cookie3
+
 logger = logging.getLogger(__name__)
 
 _SUPPORTED_BROWSERS = (
@@ -32,14 +34,9 @@ def load_cookies_from_file(path: str) -> http.cookiejar.CookieJar:
 def load_cookies_from_browser(browser: str) -> http.cookiejar.CookieJar:
     """Extract YouTube cookies from a locally installed browser.
 
-    Requires the ``browser-cookie3`` package::
-
-        pip install pyt[cookies]
-
     Supported browsers: chrome, chromium, firefox, brave, edge, safari, opera.
 
     :param browser: Browser name (case-insensitive).
-    :raises ImportError: If browser-cookie3 is not installed.
     :raises ValueError: If *browser* is not supported.
     """
     browser = browser.lower()
@@ -47,13 +44,6 @@ def load_cookies_from_browser(browser: str) -> http.cookiejar.CookieJar:
         raise ValueError(
             f"Unsupported browser '{browser}'. "
             f"Choose from: {', '.join(_SUPPORTED_BROWSERS)}"
-        )
-    try:
-        import browser_cookie3  # type: ignore
-    except ImportError:
-        raise ImportError(
-            "browser-cookie3 is required for --cookies-from-browser.\n"
-            "Install it with:  pip install pyt[cookies]"
         )
 
     loader = getattr(browser_cookie3, browser, None)

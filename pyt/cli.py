@@ -11,6 +11,7 @@ import argparse
 import subprocess  # nosec
 import time
 import random
+import warnings
 import datetime as dt
 import pyt.exceptions as exceptions
 from urllib.error import HTTPError
@@ -1182,7 +1183,9 @@ def main() -> None:
         if _is_channel_url(url):
             sys.stdout.write(f"\n  {DM}Loading channel …{R}\n")
             try:
-                channel = Channel(url)
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore", DeprecationWarning)
+                    channel = Channel(url)
                 playlist_title = getattr(channel, "channel_name", None) or url.rstrip("/").split("/")[-1]
                 if not args.target and not template:
                     args.target = safe_filename(playlist_title)
@@ -1205,7 +1208,9 @@ def main() -> None:
         elif "/playlist" in url:
             sys.stdout.write(f"\n  {DM}Loading playlist …{R}\n")
             try:
-                playlist = Playlist(url)
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore", DeprecationWarning)
+                    playlist = Playlist(url)
                 playlist_title = getattr(playlist, "title", None)
                 if not args.target and not template:
                     args.target = safe_filename(playlist_title or "playlist")
@@ -1230,7 +1235,9 @@ def main() -> None:
         else:
             sys.stdout.write(f"\n  {DM}Fetching  {url} …{R}\n")
             try:
-                youtube = YouTube(url, proxies=proxies, po_token=args.po_token)
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore", DeprecationWarning)
+                    youtube = YouTube(url, proxies=proxies, po_token=args.po_token)
                 _perform_args_on_youtube(
                     youtube, args, archive=archive, template=template,
                 )

@@ -1,6 +1,7 @@
 """Module to download a complete playlist from a youtube channel."""
 import json
 import logging
+import warnings
 
 from collections.abc import Sequence
 from datetime import (
@@ -31,9 +32,18 @@ from pyt.helpers import (
 logger = logging.getLogger(__name__)
 
 class Playlist(Sequence):
-    """Load a YouTube playlist with URL"""
+    """Load a YouTube playlist with URL.
+
+    .. deprecated::
+        Use :meth:`pyt.Client.playlist` instead.
+    """
 
     def __init__(self, url: str, proxies: Optional[Dict[str, str]] = None):
+        warnings.warn(
+            "pyt.Playlist is deprecated. Use pyt.Client().playlist(url) instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         if proxies:
             install_proxy(proxies)
 
@@ -313,7 +323,9 @@ class Playlist(Sequence):
 
     def videos_generator(self):
         for url in self.video_urls:
-            yield YouTube(url)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", DeprecationWarning)
+                yield YouTube(url)
 
     @property
     def videos(self) -> Iterable[YouTube]:

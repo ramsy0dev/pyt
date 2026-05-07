@@ -5,6 +5,8 @@ import os
 import logging
 from typing import TYPE_CHECKING
 
+from mutagen.id3 import ID3, TIT2, TPE1, TDRC, COMM, ID3NoHeaderError
+
 from pyt.postprocessors.ffmpeg import FFmpegPostProcessor
 
 if TYPE_CHECKING:
@@ -19,8 +21,7 @@ class FFmpegMetadataEmbedder(FFmpegPostProcessor):
 
     Equivalent to yt-dlp's ``--embed-metadata``.
     Uses ffmpeg ``-metadata`` flags so no re-encoding is required.
-    For MP3 files, uses ``mutagen`` (``pip install pyt[metadata]``) for richer
-    ID3 tag support; falls back to ffmpeg when mutagen is not available.
+    For MP3 files, uses ``mutagen`` for richer ID3 tag support.
     """
 
     def run(self, file_path: str, stream: "Stream", youtube: "YouTube") -> str:
@@ -45,13 +46,6 @@ class FFmpegMetadataEmbedder(FFmpegPostProcessor):
     # ── mutagen path (MP3) ───────────────────────────────────────────────────
 
     def _try_mutagen(self, file_path: str, youtube: "YouTube") -> bool:
-        try:
-            from mutagen.id3 import ID3, TIT2, TPE1, TDRC, COMM  # type: ignore
-            from mutagen.id3 import ID3NoHeaderError
-        except ImportError:
-            logger.debug("mutagen not installed; using ffmpeg for mp3 metadata")
-            return False
-
         try:
             tags = ID3(file_path)
         except ID3NoHeaderError:

@@ -6,13 +6,8 @@ Equivalent to yt-dlp's `--embed-metadata`.
 
 ## Requirements
 
-ffmpeg must be on `PATH`. For richer MP3 ID3 tag support, install mutagen:
-
-```bash
-pip install pyt[metadata]
-```
-
-Without mutagen, MP3 files fall back to ffmpeg's built-in metadata support (works but with limited ID3 tag types).
+ffmpeg must be on `PATH`. `mutagen` (used for richer MP3 ID3 tags) ships as
+a base dependency — no extra install step.
 
 ## CLI Usage
 

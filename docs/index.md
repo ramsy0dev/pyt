@@ -25,16 +25,10 @@
 
 ```bash
 pip install pyt
-
-# With metadata embedding support (mutagen for richer MP3 tags):
-pip install pyt[metadata]
-
-# With browser cookie extraction:
-pip install pyt[cookies]
-
-# All extras:
-pip install pyt[all]
 ```
+
+`mutagen` (richer MP3/ID3 tags) and `browser-cookie3` (browser cookie
+extraction) are now part of the base install.
 
 ffmpeg is required for post-processing features (audio extraction, metadata embedding, SponsorBlock, thumbnail/subtitle embedding). Download it from https://ffmpeg.org/download.html.
 

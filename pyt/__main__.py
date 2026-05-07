@@ -5,9 +5,14 @@ The problem domain of the :class:`YouTube <YouTube> class focuses almost
 exclusively on the developer interface. Pytube offloads the heavy lifting to
 smaller peripheral modules and functions.
 
+This is the **legacy** developer interface. New code should use
+:class:`pyt.Client` and :class:`pyt.Video` from :mod:`pyt.api`. The classes
+here will be moved to :mod:`pyt.legacy` and removed from the top-level
+namespace in a future major release.
 """
 import logging
 import re
+import warnings
 import pyt
 import pyt.exceptions as exceptions
 
@@ -18,6 +23,16 @@ from typing import (
     Dict,
     List,
     Optional
+)
+
+_DEPRECATION_MESSAGE = (
+    "pyt.YouTube is deprecated and will be removed in a future major release. "
+    "Use pyt.Client instead:\n"
+    "    client = pyt.Client()\n"
+    "    video = client.video(url)\n"
+    "    video.streams.audio.best().download_to('downloads/').run()\n"
+    "See the README for the full migration guide. To silence this warning "
+    "while you migrate, import the class explicitly from pyt.legacy."
 )
 
 from pyt import (
@@ -74,6 +89,8 @@ class YouTube:
             (Optional) Cache OAuth tokens locally on the machine. Defaults to True.
             These tokens are only generated if use_oauth is set to True as well.
         """
+        warnings.warn(_DEPRECATION_MESSAGE, DeprecationWarning, stacklevel=2)
+
         self._js: Optional[str] = None  # js fetched by js_url
         self._js_url: Optional[str] = None  # the url to the js, parsed from watch html
 
@@ -617,7 +634,15 @@ class YouTube:
 
         :rtype: None
 
+        .. deprecated::
+            Pass ``on_progress=`` to :class:`pyt.Client` instead.
         """
+        warnings.warn(
+            "register_on_progress_callback is deprecated. "
+            "Pass on_progress= to pyt.Client(...) instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self.stream_monostate.on_progress = func
 
     def register_on_complete_callback(self, func: Callable[[Any, Optional[str]], None]):
@@ -628,7 +653,15 @@ class YouTube:
 
         :rtype: None
 
+        .. deprecated::
+            Pass ``on_complete=`` to :class:`pyt.Client` instead.
         """
+        warnings.warn(
+            "register_on_complete_callback is deprecated. "
+            "Pass on_complete= to pyt.Client(...) instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self.stream_monostate.on_complete = func
 
     @staticmethod
@@ -639,6 +672,11 @@ class YouTube:
             The video id of the YouTube video.
 
         :rtype: :class:`YouTube <YouTube>`
-        
+
+        .. deprecated::
+            Use :meth:`pyt.Client.video` instead.
         """
-        return YouTube(f"https://www.youtube.com/watch?v={video_id}")
+        warnings.warn(_DEPRECATION_MESSAGE, DeprecationWarning, stacklevel=2)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            return YouTube(f"https://www.youtube.com/watch?v={video_id}")

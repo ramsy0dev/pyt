@@ -29,7 +29,7 @@ pyt is a YouTube-first library that covers all major yt-dlp features for YouTube
 | Subtitle format conversion | ✅ | ✅ | SRT |
 | **Metadata & Tags** | | | |
 | Embed title / artist / date | ✅ | ✅ | |
-| MP3 ID3 tags (mutagen) | ✅ | ✅ | requires `pip install pyt[metadata]` |
+| MP3 ID3 tags (mutagen) | ✅ | ✅ | bundled in base install |
 | Embed thumbnail as cover art | ✅ | ✅ | MP4, M4A, OGG, FLAC, MP3 |
 | Write `.description` file | ✅ | 🔜 Phase 3 | |
 | Write `.info.json` file | ✅ | 🔜 Phase 3 | |
@@ -52,7 +52,7 @@ pyt is a YouTube-first library that covers all major yt-dlp features for YouTube
 | Filter by playlist index | ✅ | 🔜 Phase 2 | |
 | **Authentication** | | | |
 | Netscape cookie file | ✅ | ✅ | |
-| Browser cookie extraction | ✅ | ✅ | requires `pip install pyt[cookies]` |
+| Browser cookie extraction | ✅ | ✅ | bundled in base install |
 | Age-restricted bypass | ✅ | ✅ | mobile client fallback |
 | Members-only (OAuth) | ✅ | 🔜 Phase 2 | |
 | **Network** | | | |

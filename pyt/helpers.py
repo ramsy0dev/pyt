@@ -387,6 +387,7 @@ def create_mock_html_json(vid_id) -> Dict[str, Any]:
     :return dict data
         Dict used to generate the json.gz file
     """
+    import warnings
     from pyt import YouTube
     gzip_filename = 'yt-video-%s-html.json.gz' % vid_id
 
@@ -400,7 +401,9 @@ def create_mock_html_json(vid_id) -> Dict[str, Any]:
     pyt_mocks_path = os.path.join(pyt_dir_path, 'tests', 'mocks')
     gzip_filepath = os.path.join(pyt_mocks_path, gzip_filename)
 
-    yt = YouTube(f'https://www.youtube.com/watch?v={vid_id}')
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        yt = YouTube(f'https://www.youtube.com/watch?v={vid_id}')
     html_data = {
         'url': yt.watch_url,
         'js': yt.js,

@@ -41,16 +41,12 @@ for YouTube-specific use cases.
 
 ```bash
 pip install git+https://github.com/ramsy0dev/pyt
-
-# With richer MP3/ID3 tag support:
-pip install "git+https://github.com/ramsy0dev/pyt#egg=pyt[metadata]"
-
-# With browser cookie extraction:
-pip install "git+https://github.com/ramsy0dev/pyt#egg=pyt[cookies]"
-
-# Everything:
-pip install "git+https://github.com/ramsy0dev/pyt#egg=pyt[all]"
 ```
+
+`mutagen` (richer MP3/ID3 tagging) and `browser-cookie3` (browser cookie
+extraction) are installed automatically — they used to be optional extras,
+but cookies in particular are now load-bearing for the SABR workaround so
+they're part of the base install.
 
 ffmpeg is required for post-processing (audio conversion, metadata/thumbnail/subtitle
 embedding, SponsorBlock). Get it at https://ffmpeg.org/download.html.
@@ -89,45 +85,109 @@ pyt <url> --cookies-from-browser firefox
 
 ## Quick start — Python API
 
+`pyt.Client` is the modern entry point. Construct it once, then use it
+to fetch videos and queue downloads.
+
 ```python
-from pyt import YouTube
+from pyt import Client
 
-yt = YouTube("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
-print(yt.title)   # Rick Astley - Never Gonna Give You Up
-print(yt.length)  # 212 seconds
+client = Client()
+video = client.video("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
 
-# Highest progressive quality (video + audio in one file, no ffmpeg needed)
-yt.streams.get_highest_resolution().download()
+print(video.title)            # str
+print(video.length)           # datetime.timedelta
+print(video.author.name)      # str
 
-# Audio only
-yt.streams.filter(only_audio=True).first().download()
+# Highest progressive quality (video + audio in one file)
+video.streams.progressive.best().download_to("downloads/").run()
+
+# Audio only — .best() raises NoMatchingStream if nothing matches
+video.streams.audio.best().download_to("downloads/").run()
 
 # Specific resolution
-yt.streams.filter(res="1080p", progressive=False).first().download()
-
-# Progress callback
-def on_progress(stream, chunk, remaining):
-    pct = (stream.filesize - remaining) / stream.filesize
-    print(f"\r{pct:.1%}", end="")
-
-yt = YouTube(url, on_progress_callback=on_progress)
-yt.streams.get_highest_resolution().download()
+video.streams.video.filter(resolution="1080p").best().download_to().run()
 ```
 
-### Post-processing
+`Client` accepts `proxy=`, `cookies=`, `cookies_from_browser=`, `po_token=`,
+`use_oauth=`, plus `on_progress` / `on_complete` callbacks. The session
+state lives on the client — there are no module-level globals you need
+to reason about across instances.
+
+### Post-processing — declarative pipeline
 
 ```python
-from pyt import YouTube
-from pyt.postprocessors import AudioExtractor, FFmpegMetadataEmbedder, SponsorBlockPP
+from pyt import Client, pipeline as pp
 
-yt = YouTube(url)
-stream = yt.streams.filter(only_audio=True).order_by("abr").last()
-path = stream.download()
+client = Client()
+video = client.video(url)
+stream = video.streams.audio.order_by("abr").desc().best()
 
-path = SponsorBlockPP(mode="mark", categories=["sponsor", "intro"]).run(path, stream, yt)
-path = FFmpegMetadataEmbedder().run(path, stream, yt)
-path = AudioExtractor(format="mp3").run(path, stream, yt)
+path = (
+    stream.download_to("downloads/")
+        | pp.sponsorblock(mark=["sponsor", "intro"])
+        | pp.embed_metadata()
+        | pp.embed_thumbnail()
+        | pp.extract_audio("mp3")
+).run()
 ```
+
+Steps run in order. Failures raise `PostProcessError` with `step=` and
+`partial_output_path=` set, so you can recover or report cleanly.
+
+### Errors
+
+Every modern API failure inherits from `pyt.PytError`:
+
+| Exception | When |
+|---|---|
+| `VideoUnavailable` | private, removed, region-blocked, members-only |
+| `AgeRestricted` | tier-3 age gate (needs OAuth) |
+| `LiveStreamNotSupported` | URL is a live stream |
+| `NoMatchingStream` | `.best()` / `.one()` saw an empty filter chain |
+| `DownloadError` | byte transfer failed (network, 403, SABR exhaustion) |
+| `PostProcessError` | a pipeline step failed |
+| `ConfigError` | invalid `Client(...)` argument |
+
+### Migrating from the legacy API
+
+The original `YouTube` / `Playlist` / `Channel` / `Search` /
+`StreamQuery` / `register_on_*_callback` classes now emit a
+`DeprecationWarning`. They still work — the new API is a thin facade
+over them — but new code should use `pyt.Client`.
+
+| Old | New |
+|---|---|
+| `YouTube(url)` | `Client().video(url)` |
+| `YouTube.from_id(vid)` | `Client().video(f"https://youtu.be/{vid}")` |
+| `yt.streams.get_highest_resolution()` | `video.streams.progressive.best()` |
+| `yt.streams.filter(only_audio=True).first()` | `video.streams.audio.best()` |
+| `yt.streams.filter(res="1080p").first()` | `video.streams.video.filter(resolution="1080p").best()` |
+| `yt.register_on_progress_callback(cb)` | `Client(on_progress=cb)` |
+| `Playlist(url)` | `Client().playlist(url)` |
+| `Channel(url)` | `Client().channel(url)` |
+| `Search(query)` | `Client().search(query)` |
+| Manual PP chain (`SponsorBlockPP(...).run(p, s, yt)` …) | `download \| pp.sponsorblock(...) \| pp.embed_metadata()` |
+| `from pyt.exceptions import …` | `from pyt import PytError, VideoUnavailable, NoMatchingStream, …` |
+
+Need something the new surface doesn't expose? Every wrapper has a
+`.legacy` escape hatch (`video.legacy`, `stream.legacy`,
+`playlist.legacy`) that returns the underlying old object.
+
+To silence the deprecation warnings while you migrate, either filter
+them in your code:
+
+```python
+import warnings
+warnings.filterwarnings("ignore", category=DeprecationWarning, module=r"pyt\..*")
+```
+
+…or import explicitly from the `pyt.legacy` namespace
+(`from pyt.legacy import YouTube`) so it's grep-able which call sites
+are still on the old surface.
+
+The legacy classes will be removed from the top-level `pyt` namespace
+in v2; `pyt.legacy.*` will outlive that release by one more cycle to
+keep migration windows reasonable.
 
 ---
 
@@ -200,15 +260,27 @@ CLI flags always override config values.
 
 ---
 
-## Playlists and channels
+## Playlists, channels and search
 
 ```python
-from pyt import Playlist
+from pyt import Client
 
-p = Playlist("https://www.youtube.com/playlist?list=PLxxxxxxxx")
-print(p.title)
-for video in p.videos:
-    video.streams.get_highest_resolution().download()
+client = Client()
+
+# Playlist — lazy iteration, one HTTP fetch per video
+playlist = client.playlist("https://www.youtube.com/playlist?list=PLxxxxxxxx")
+print(playlist.title, len(playlist))
+for video in playlist:
+    video.streams.progressive.best().download_to("downloads/").run()
+
+# Channel feed
+channel = client.channel("https://www.youtube.com/@somechannel")
+print(channel.name)
+
+# Search
+results = client.search("python tutorial")
+for video in results.videos:
+    print(video.title, video.url)
 ```
 
 ---

@@ -6,13 +6,9 @@ Equivalent to yt-dlp's `--cookies` and `--cookies-from-browser`.
 
 ## Requirements
 
-**From file**: No additional packages needed (Python stdlib `http.cookiejar`).
-
-**From browser**: Install browser-cookie3:
-
-```bash
-pip install pyt[cookies]
-```
+`browser-cookie3` (browser extraction) and Python stdlib `http.cookiejar`
+(file-based cookies) are both available out of the box — no extra install
+step.
 
 ## CLI Usage
 

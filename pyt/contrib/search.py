@@ -1,6 +1,7 @@
 """Module for interacting with YouTube search."""
 # Native python imports
 import logging
+import warnings
 
 from pyt import YouTube
 from pyt.innertube import InnerTube
@@ -8,12 +9,23 @@ from pyt.innertube import InnerTube
 logger = logging.getLogger(__name__)
 
 class Search:
+    """YouTube search.
+
+    .. deprecated::
+        Use :meth:`pyt.Client.search` instead.
+    """
+
     def __init__(self, query):
         """Initialize Search object.
 
         :param str query:
             Search query provided by the user.
         """
+        warnings.warn(
+            "pyt.Search is deprecated. Use pyt.Client().search(query) instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self.query = query
         self._innertube_client = InnerTube(client='WEB')
 
@@ -198,7 +210,9 @@ class Search:
                 }
 
                 # Construct YouTube object from metadata and append to results
-                vid = YouTube(vid_metadata['url'])
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore", DeprecationWarning)
+                    vid = YouTube(vid_metadata['url'])
                 vid.author = vid_metadata['channel_name']
                 vid.title = vid_metadata['title']
                 videos.append(vid)

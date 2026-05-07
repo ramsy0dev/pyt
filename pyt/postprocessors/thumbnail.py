@@ -7,6 +7,8 @@ import tempfile
 import urllib.request
 from typing import TYPE_CHECKING
 
+from mutagen.id3 import ID3, APIC, ID3NoHeaderError
+
 from pyt.postprocessors.ffmpeg import FFmpegPostProcessor
 
 if TYPE_CHECKING:
@@ -25,8 +27,7 @@ class EmbedThumbnailPostProcessor(FFmpegPostProcessor):
     Equivalent to yt-dlp's ``--embed-thumbnail``.
     MP4/M4A/MOV use ffmpeg's attached-picture method (no re-encode).
     OGG/Opus/FLAC embed via ffmpeg metadata stream.
-    MP3 uses ``mutagen`` (``pip install pyt[metadata]``) for APIC frame;
-    falls back to ffmpeg when mutagen is unavailable.
+    MP3 uses ``mutagen`` for the APIC frame.
     """
 
     def run(self, file_path: str, stream: "Stream", youtube: "YouTube") -> str:
@@ -85,13 +86,6 @@ class EmbedThumbnailPostProcessor(FFmpegPostProcessor):
         return self._replace_file(tmp, file_path)
 
     def _try_mutagen_mp3(self, file_path: str, thumb_path: str) -> bool:
-        try:
-            from mutagen.id3 import ID3, APIC  # type: ignore
-            from mutagen.id3 import ID3NoHeaderError
-        except ImportError:
-            logger.debug("mutagen not installed; using ffmpeg for mp3 thumbnail")
-            return False
-
         with open(thumb_path, "rb") as f:
             data = f.read()
 

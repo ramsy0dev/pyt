@@ -6,11 +6,8 @@ Equivalent to yt-dlp's `--embed-thumbnail`.
 
 ## Requirements
 
-ffmpeg must be on `PATH`. For MP3 files, install mutagen for APIC frame support:
-
-```bash
-pip install pyt[metadata]
-```
+ffmpeg must be on `PATH`. `mutagen` (used for the MP3 APIC frame) ships as
+a base dependency.
 
 ## CLI Usage
 
@@ -27,7 +24,7 @@ pyt <url> -x --audio-format mp3 --embed-thumbnail --embed-metadata
 |---|---|
 | MP4, M4A, MOV | ffmpeg attached picture (`-disposition:v:1 attached_pic`) |
 | OGG, Opus, FLAC | ffmpeg metadata stream |
-| MP3 | mutagen APIC frame (requires `pyt[metadata]`), else ffmpeg |
+| MP3 | mutagen APIC frame |
 
 ## Python API
 

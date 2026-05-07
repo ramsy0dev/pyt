@@ -1,6 +1,5 @@
 """Tests for pyt.cookies — load_cookies_from_file, load_cookies_from_browser, install_cookies."""
 import http.cookiejar
-import sys
 
 import pytest
 from unittest import mock
@@ -49,19 +48,12 @@ def test_load_cookies_browser_unsupported_raises():
         load_cookies_from_browser("lynx")
 
 
-@pytest.mark.parametrize("browser", _SUPPORTED_BROWSERS)
-def test_load_cookies_browser_raises_import_error_without_package(browser):
-    with mock.patch.dict(sys.modules, {"browser_cookie3": None}):
-        with pytest.raises(ImportError, match="browser-cookie3"):
-            load_cookies_from_browser(browser)
-
-
 def test_load_cookies_browser_calls_correct_loader():
     fake_jar = http.cookiejar.CookieJar()
     mock_bc3 = mock.MagicMock()
     mock_bc3.chrome.return_value = fake_jar
 
-    with mock.patch.dict(sys.modules, {"browser_cookie3": mock_bc3}):
+    with mock.patch.object(cookies_mod, "browser_cookie3", mock_bc3):
         result = load_cookies_from_browser("chrome")
 
     mock_bc3.chrome.assert_called_once_with(domain_name=".youtube.com")
@@ -73,7 +65,7 @@ def test_load_cookies_browser_case_insensitive():
     mock_bc3 = mock.MagicMock()
     mock_bc3.firefox.return_value = fake_jar
 
-    with mock.patch.dict(sys.modules, {"browser_cookie3": mock_bc3}):
+    with mock.patch.object(cookies_mod, "browser_cookie3", mock_bc3):
         result = load_cookies_from_browser("FIREFOX")
 
     mock_bc3.firefox.assert_called_once_with(domain_name=".youtube.com")

@@ -23,3 +23,28 @@ from pyt.postprocessors import (
     SponsorBlockPP,
     PostProcessorError,
 )
+
+# Modern API — see pyt.api for the full surface. The legacy classes above
+# remain importable until the next major bump but emit DeprecationWarning.
+# Modern Playlist/ChannelFeed/SearchResults live under pyt.api to avoid
+# colliding with the legacy ``pyt.Playlist`` / ``pyt.Channel``.
+from pyt.api import (
+    Client,
+    Video,
+    StreamSet,
+    StreamRef,
+    Download,
+    ChannelFeed,
+    SearchResults,
+    pipeline,
+    VideoMeta,
+    Thumbnail,
+    PytError,
+    VideoUnavailable,
+    AgeRestricted,
+    LiveStreamNotSupported,
+    NoMatchingStream,
+    DownloadError,
+    PostProcessError,
+    ConfigError,
+)
