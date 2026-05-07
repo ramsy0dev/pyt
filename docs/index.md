@@ -1,17 +1,19 @@
 # pyt Documentation
 
-**pyt** is an actively maintained Python 3 library and CLI for downloading YouTube videos. It is a feature-enhanced fork of pytube with zero required runtime dependencies that rivals yt-dlp for YouTube-specific use cases.
+**pyt** is an actively maintained Python 3 library and CLI for downloading YouTube videos. It is a feature-enhanced fork of pytube with minimal runtime dependencies that rivals yt-dlp for YouTube-specific use cases.
 
 ## Feature Overview
 
 | Category | Features |
 |---|---|
 | **Download** | 144p – 8K, progressive & DASH, audio-only, ffmpeg merge |
+| **Combined adaptive download** | One multiplexed SABR session for video+audio, ffmpeg merge with output validation |
 | **Audio extraction** | Convert to mp3, m4a, flac, opus, vorbis, wav, aac, alac |
 | **Metadata** | Embed title, artist, date, description (ffmpeg + mutagen) |
 | **Thumbnails** | Embed cover art into mp4, m4a, mp3, ogg, flac |
 | **Subtitles** | Embed SRT into mp4, mkv, webm; 100+ language codes |
 | **SponsorBlock** | Mark segments as chapters or remove them entirely |
+| **Upscaling** *(experimental)* | Lanczos (real-time, no GPU) and Real-ESRGAN (neural, GPU recommended) |
 | **Output templates** | `%(title)s`, `%(author)s`, `%(upload_date)s`, and more |
 | **Archive tracking** | Skip already-downloaded videos across runs |
 | **Batch processing** | Download from a file of URLs |
@@ -20,6 +22,7 @@
 | **Config files** | `~/.pyt.conf` for persistent defaults |
 | **Playlists & channels** | Full playlist and channel support |
 | **Search** | Search YouTube from the Python API |
+| **Doctor command** | Detect installed tools, auto-install ffmpeg / realesrgan-ncnn-vulkan |
 
 ## Installation
 
@@ -28,9 +31,16 @@ pip install pyt
 ```
 
 `mutagen` (richer MP3/ID3 tags) and `browser-cookie3` (browser cookie
-extraction) are now part of the base install.
+extraction) are part of the base install.
 
-ffmpeg is required for post-processing features (audio extraction, metadata embedding, SponsorBlock, thumbnail/subtitle embedding). Download it from https://ffmpeg.org/download.html.
+ffmpeg is required for post-processing features (audio extraction,
+metadata embedding, SponsorBlock, thumbnail/subtitle embedding,
+combined merge, upscaling). Get it from
+https://ffmpeg.org/download.html — or run `pyt --doctor --install
+ffmpeg` to drop it into `~/.pyt/bin/` automatically.
+
+Run `pyt --doctor` at any time to see which tools are installed and
+which features that unlocks.
 
 ## Quick Start
 
@@ -49,9 +59,44 @@ pyt <url> -o "{author}/{upload_date:%Y-%m-%d} - {title}.{ext}"
 
 # Batch download with archive (skip already downloaded)
 pyt --batch-file urls.txt --download-archive archive.txt --sleep-interval 2
+
+# What tools are installed?
+pyt --doctor
 ```
 
+```python
+# Modern Python API
+from pyt import Client, pipeline as pp
+
+client = Client()
+video = client.video("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+
+path = (
+    video.download_best("downloads/", prefer_resolution="1080p")
+        | pp.embed_metadata()
+        | pp.embed_thumbnail()
+).run()
+```
+
+## Stability tiers
+
+| Tier | Features | Notes |
+|---|---|---|
+| **Stable** | All download / merge / metadata / thumbnail / subtitle / SponsorBlock / playlist / search / cookie / proxy / archive features; doctor command | Public API, semver applies |
+| **Stable (modern)** | `pyt.Client`, `Video`, `StreamSet`, `Download`, `CombinedDownload`, `pipeline.*` | Replaces the deprecated `pyt.YouTube`/`Playlist`/`Channel`/`Search` classes |
+| **Deprecated** | `pyt.YouTube`, `pyt.Playlist`, `pyt.Channel`, `pyt.Search`, `register_on_*_callback` | Still works; emits `DeprecationWarning`. Will move to `pyt.legacy.*` and be removed from top-level in v2 |
+| **Experimental** | `pp.upscale(...)` (both `algorithm="lanczos"` and `algorithm="realesrgan"`) | API and defaults may change. Emits `FutureWarning` on first use |
+
 ## Feature Documentation
+
+**Modern surface (recommended for new code):**
+
+- [Modern Python API (Client / Video / Streams / Pipeline)](features/python-api.md)
+- [Combined Adaptive Download](features/combined-download.md)
+- [Doctor Command](features/doctor.md) — tool detection + auto-install
+- [Upscaling](features/upscale.md) *(experimental)*
+
+**Per-feature guides:**
 
 - [Audio Extraction](features/audio-extraction.md)
 - [Output Templates](features/output-templates.md)

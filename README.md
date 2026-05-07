@@ -22,11 +22,13 @@ for YouTube-specific use cases.
 | Category | What pyt does |
 |---|---|
 | **Download** | 144p – 8K, progressive & DASH, audio-only, auto-merge with ffmpeg |
+| **Combined adaptive download** | One multiplexed SABR session for video+audio, post-merge duration validation |
 | **Audio extraction** | Convert to mp3, m4a, flac, opus, vorbis, wav, aac, alac |
-| **Metadata** | Embed title, artist, date, description (ffmpeg + optional mutagen) |
+| **Metadata** | Embed title, artist, date, description (ffmpeg + mutagen) |
 | **Thumbnails** | Embed cover art into mp4, m4a, mp3, ogg, flac |
 | **Subtitles** | Embed SRT/VTT into mp4, mkv, webm; 100+ language codes |
 | **SponsorBlock** | Mark segments as chapters or cut them out entirely |
+| **Upscaling** *(experimental)* | Lanczos (real-time, no GPU) and Real-ESRGAN (neural, GPU recommended) |
 | **Output templates** | `{author}/{upload_date:%Y-%m-%d} - {title}.{ext}` and more |
 | **Archive tracking** | Skip already-downloaded videos across runs |
 | **Batch processing** | Download from a file of URLs |
@@ -34,6 +36,15 @@ for YouTube-specific use cases.
 | **Proxy / geo-bypass** | HTTP, HTTPS, SOCKS5 proxy; `X-Forwarded-For` spoofing |
 | **Config files** | `~/.pyt.conf` for persistent defaults |
 | **Playlists & channels** | Full playlist and channel support |
+| **Doctor command** | Detect installed tools, auto-install ffmpeg / realesrgan-ncnn-vulkan |
+
+### Stability tiers
+
+| Tier | What's in it |
+|---|---|
+| **Stable** | All download, post-processing, playlist, search, cookie, proxy, archive features. CLI flags. The `pyt.Client` / `Video` / `Stream` / pipeline modern Python API. The doctor command. |
+| **Deprecated** | `pyt.YouTube`, `pyt.Playlist`, `pyt.Channel`, `pyt.Search`, `register_on_*_callback`. Still works; emits `DeprecationWarning`. Will move to `pyt.legacy.*` and be removed from the top-level namespace in v2. |
+| **Experimental** | `pp.upscale(...)` — both `algorithm="lanczos"` and `algorithm="realesrgan"`. Emits `FutureWarning` on first use; API and defaults may change. |
 
 ---
 
@@ -126,6 +137,9 @@ pyt <url> --proxy socks5://127.0.0.1:9050
 
 # Cookies from browser
 pyt <url> --cookies-from-browser firefox
+
+# Check what's installed and what works
+pyt --doctor
 ```
 
 ---

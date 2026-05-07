@@ -11,7 +11,8 @@ pyt is a YouTube-first library that covers all major yt-dlp features for YouTube
 | Audio-only download | ✅ | ✅ | |
 | Progressive streams | ✅ | ✅ | |
 | DASH adaptive streams | ✅ | ✅ | |
-| ffmpeg stream merging | ✅ | ✅ | |
+| ffmpeg stream merging | ✅ | ✅ | with post-merge duration validation |
+| Multi-format SABR multiplex | ❌ | ✅ | one session for video+audio (CombinedDownload) |
 | HDR / 3D streams | ✅ | ✅ | |
 | Live stream (HLS) | ✅ | 🔜 Phase 2 | |
 | DASH/HLS fragmented download | ✅ | 🔜 Phase 3 | |
@@ -67,11 +68,19 @@ pyt is a YouTube-first library that covers all major yt-dlp features for YouTube
 | **Configuration** | | | |
 | Config file (`~/.pyt.conf`) | ✅ | ✅ | INI format |
 | Per-URL options | ✅ | ❌ | |
+| **Upscaling** *(experimental)* | | | |
+| ffmpeg lanczos resize | ⚠️ via filter | ✅ | `pp.upscale(scale=2)`, real-time |
+| Real-ESRGAN neural upscale | ❌ | ✅ | `pp.upscale(algorithm="realesrgan")`, GPU-friendly |
+| Chunked processing for big videos | ❌ | ✅ | bounds peak disk use |
+| **Setup tooling** | | | |
+| Detect installed tools | ❌ | ✅ | `pyt --doctor` |
+| Auto-install ffmpeg | ❌ | ✅ | Windows / Linux (macOS uses Homebrew) |
+| Auto-install neural upscaler | ❌ | ✅ | `pyt --doctor --install realesrgan` |
 | **Site Support** | | | |
 | YouTube | ✅ | ✅ | |
 | 1800+ other sites | ✅ | ❌ | pyt is YouTube-first |
 
-**Legend:** ✅ Implemented · 🔜 Planned · ❌ Not planned / out of scope
+**Legend:** ✅ Implemented · ⚠️ Partial · 🔜 Planned · ❌ Not planned / out of scope
 
 ## Key Advantages of pyt Over yt-dlp (for YouTube)
 
