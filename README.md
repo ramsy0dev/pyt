@@ -174,6 +174,8 @@ video.download_best("downloads/", prefer_resolution="1080p").run()
 ```
 
 `Client` accepts `proxy=`, `cookies=`, `cookies_from_browser=`, `po_token=`,
+`po_token_provider=` / `po_token_cmd=` / `po_token_script=` for dynamic
+generators (see [docs/features/po-token.md](docs/features/po-token.md)),
 `use_oauth=`, plus `on_progress` / `on_complete` callbacks. The session
 state lives on the client — there are no module-level globals you need
 to reason about across instances.
@@ -367,6 +369,7 @@ Every modern API failure inherits from `pyt.PytError`:
 | `VideoUnavailable` | private, removed, region-blocked, members-only |
 | `AgeRestricted` | tier-3 age gate (needs OAuth) |
 | `LiveStreamNotSupported` | URL is a live stream |
+| `AttestationRequired` | YouTube wants a PO token (see [docs/features/po-token.md](docs/features/po-token.md)) |
 | `NoMatchingStream` | `.best()` / `.one()` saw an empty filter chain |
 | `DownloadError` | byte transfer failed (network, 403, SABR exhaustion) |
 | `PostProcessError` | a pipeline step failed |
@@ -451,6 +454,11 @@ Network:
   --cookies-from-browser B Extract cookies from browser (chrome firefox brave edge safari)
   --geo-bypass             Spoof X-Forwarded-For with a random IP
   --geo-bypass-country CC  Use a specific country code (e.g. US)
+
+PO token (for ATTESTATION_REQUIRED — see docs/features/po-token.md):
+  --po-token TOKEN         Static base64url token (extract from browser DevTools)
+  --po-token-cmd CMD       Command that prints a token to stdout
+  --po-token-script FILE   JS file run with node / bun / deno
 
 Batch:
   --batch-file FILE        File of URLs to download (one per line)
@@ -561,11 +569,17 @@ handles:
 
 What's missing / works but not great:
 
-- **PO token.** Required by some accounts for some videos. We can ship it if
-  you have one; we can't generate it (BotGuard attestation runs in a real
-  browser). Long-term plan: vendor a generator like `bgutil-pot`. For now: if
-  you hit `ATTESTATION_REQUIRED`, pass `po_token=...` to `YouTube(...)` and
-  it'll work.
+- **PO token.** Required by some accounts for some videos. We don't
+  generate them (BotGuard runs in a real browser), but the modern
+  `Client` has full plumbing for any external generator: `po_token=` for
+  a static value, `po_token_provider=` for a Python callable,
+  `po_token_cmd=` to shell out, or `po_token_script=` to run a JS file
+  with whatever JS runtime is on `PATH` (node / bun / deno). On
+  `ATTESTATION_REQUIRED`, the download path refreshes the token via the
+  configured provider and retries once. Run `pyt --doctor` to see which
+  runtimes / generators are installed. See
+  [docs/features/po-token.md](docs/features/po-token.md) for the full
+  workflow.
 - **Live streams.** Metadata yes, downloads no. SABR live needs `SABR_SEEK` /
   `LIVE_METADATA` handling we haven't wired up.
 - **Multi-format download orchestrator** — done in the new API. Use

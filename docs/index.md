@@ -94,6 +94,7 @@ path = (
 - [Modern Python API (Client / Video / Streams / Pipeline)](features/python-api.md)
 - [Combined Adaptive Download](features/combined-download.md)
 - [Doctor Command](features/doctor.md) — tool detection + auto-install
+- [PO Tokens](features/po-token.md) — handle `ATTESTATION_REQUIRED`
 - [Logging & Diagnostics](features/logging.md) — `pyt.enable_logging()`, `-v`/`-vv`, `pyt.diagnostic_report()`
 - [Upscaling](features/upscale.md) *(experimental)*
 

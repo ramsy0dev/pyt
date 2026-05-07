@@ -122,7 +122,12 @@ def _fake_tool(name, found):
 
 
 def test_features_all_available_when_everything_installed():
-    tools = [_fake_tool(n, True) for n in ("ffmpeg", "ffprobe", "realesrgan")]
+    # Add the JS-runtime tools too — PO-token generation is gated on
+    # at least one of them being present.
+    tools = [
+        _fake_tool(n, True)
+        for n in ("ffmpeg", "ffprobe", "realesrgan", "node", "bun", "deno", "bgutil-pot")
+    ]
     features = doctor.feature_status(tools)
     assert all(f.available for f in features)
 

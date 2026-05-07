@@ -11,9 +11,11 @@ from __future__ import annotations
 import http.cookiejar
 import logging
 import time
-from typing import Any, Callable, Dict, Optional
+from pathlib import Path
+from typing import Any, Callable, Dict, Optional, Sequence, Union
 
-from pyt.api.errors import ConfigError
+from pyt.api.errors import AttestationRequired, ConfigError
+from pyt.api.po_token import PoTokenProvider, coerce_provider
 from pyt.api.video import Video
 
 
@@ -43,6 +45,9 @@ class Client:
         cookies: Optional[str] = None,
         cookies_from_browser: Optional[str] = None,
         po_token: Optional[str] = None,
+        po_token_provider: Optional[Callable[[], str]] = None,
+        po_token_cmd: Optional[Union[str, Sequence[str]]] = None,
+        po_token_script: Optional[Union[str, Path]] = None,
         use_oauth: bool = False,
         allow_oauth_cache: bool = True,
         on_progress: Optional[ProgressCallback] = None,
@@ -61,7 +66,16 @@ class Client:
         self._proxy = proxy
         self._cookies_path = cookies
         self._cookies_browser = cookies_from_browser
-        self._po_token = po_token
+        # ``coerce_provider`` enforces "at most one" across the four
+        # po_token entry points. Result is None when the user didn't
+        # configure any — Client.video then falls back to running
+        # without a token, which is fine for most public videos.
+        self._po_token_provider: Optional[PoTokenProvider] = coerce_provider(
+            po_token=po_token,
+            po_token_provider=po_token_provider,
+            po_token_cmd=po_token_cmd,
+            po_token_script=po_token_script,
+        )
         self._use_oauth = use_oauth
         self._allow_oauth_cache = allow_oauth_cache
         self._on_progress = on_progress
@@ -71,9 +85,9 @@ class Client:
 
         logger.debug(
             "Client init: proxy=%s cookies=%s cookies_from_browser=%s "
-            "po_token=%s oauth=%s on_progress=%s on_complete=%s",
+            "po_token_provider=%s oauth=%s on_progress=%s on_complete=%s",
             bool(proxy), bool(cookies), cookies_from_browser,
-            "set" if po_token else "unset",
+            self._po_token_provider.name if self._po_token_provider else "unset",
             use_oauth,
             "set" if on_progress else "unset",
             "set" if on_complete else "unset",
@@ -84,20 +98,33 @@ class Client:
     def video(self, url: str) -> Video:
         """Fetch a single video by URL or ID. This is the network boundary —
         all attribute access on the returned :class:`Video` is pure.
+
+        Hydration uses the cached PO token (if any). If a provider is
+        configured and the actual *download* later raises
+        :class:`AttestationRequired`, the download path will refresh
+        the token and retry once. The hydration step itself doesn't
+        trigger ATTESTATION_REQUIRED — that comes from SABR, which
+        only runs at byte-transfer time.
         """
         logger.info("client.video: fetching %s", url)
         t0 = time.monotonic()
         self._ensure_cookies_installed()
         proxies = self._proxies_dict()
+
+        po_token = self._current_po_token()
         result = Video._from_url(
             url,
-            po_token=self._po_token,
+            po_token=po_token,
             use_oauth=self._use_oauth,
             allow_oauth_cache=self._allow_oauth_cache,
             proxies=proxies,
             on_progress=self._on_progress,
             on_complete=self._on_complete,
         )
+        # Stash a back-reference so Download / CombinedDownload can ask
+        # the client to refresh the PO token on AttestationRequired.
+        result._client = self
+
         # Log post-hydration timing. Wrap the attribute access so test
         # mocks of _from_url that return a sentinel don't blow up — we
         # don't want our own logging to make the API less mockable.
@@ -112,6 +139,38 @@ class Client:
         except Exception:  # noqa: BLE001 — logging must never raise
             pass
         return result
+
+    def _current_po_token(self) -> Optional[str]:
+        """The token to attach to the next outgoing request, or ``None``."""
+        if self._po_token_provider is None:
+            return None
+        try:
+            return self._po_token_provider.get()
+        except ConfigError as exc:
+            logger.warning(
+                "client: po_token provider '%s' failed (%s); "
+                "falling back to no token",
+                self._po_token_provider.name, exc,
+            )
+            return None
+
+    @property
+    def po_token(self) -> Optional[str]:
+        """The currently cached PO token, or ``None``."""
+        return self._current_po_token()
+
+    def refresh_po_token(self) -> Optional[str]:
+        """Force the provider to regenerate. Returns the new token or
+        ``None`` if no provider is configured. Called automatically by
+        the download path on :class:`AttestationRequired`."""
+        if self._po_token_provider is None:
+            return None
+        self._po_token_provider.invalidate()
+        return self._po_token_provider.get(force_refresh=True)
+
+    @property
+    def has_po_token_provider(self) -> bool:
+        return self._po_token_provider is not None
 
     def playlist(self, url: str):
         """Open a YouTube playlist."""

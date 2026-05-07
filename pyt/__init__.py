@@ -44,6 +44,7 @@ from pyt.api import (
     VideoUnavailable,
     AgeRestricted,
     LiveStreamNotSupported,
+    AttestationRequired,
     NoMatchingStream,
     DownloadError,
     PostProcessError,

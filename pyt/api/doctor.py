@@ -124,6 +124,46 @@ def known_tools() -> List[Tool]:
             install_url="https://github.com/xinntao/Real-ESRGAN/releases",
             version_flag="-h",  # ncnn binaries print usage on -h, no -version
         ),
+        # JS runtimes — any one is enough to run a PO-token generator
+        # script. The doctor only flags MISSING when none of the three
+        # are available; if at least one is found the others can stay
+        # absent without affecting the feature status.
+        Tool(
+            name="node",
+            binary="node",
+            description="JS runtime for PO-token generators (bgutil-pot, etc.)",
+            required_for=["po_token (--po-token-script / Client(po_token_script=))"],
+            install_url="https://nodejs.org",
+            installable=False,  # OS package manager is the right path here
+            version_flag="--version",
+        ),
+        Tool(
+            name="bun",
+            binary="bun",
+            description="alt JS runtime (pyt picks node first if both are present)",
+            required_for=["po_token via JS script"],
+            install_url="https://bun.sh",
+            installable=False,
+            version_flag="--version",
+        ),
+        Tool(
+            name="deno",
+            binary="deno",
+            description="alt JS runtime (pyt picks node first if all three are present)",
+            required_for=["po_token via JS script"],
+            install_url="https://deno.com",
+            installable=False,
+            version_flag="--version",
+        ),
+        Tool(
+            name="bgutil-pot",
+            binary="bgutil-pot",
+            description="community PO-token generator (use with --po-token-cmd)",
+            required_for=["po_token (--po-token-cmd)"],
+            install_url="https://github.com/Brainicism/bgutil-ytdlp-pot-provider",
+            installable=False,
+            version_flag="--version",
+        ),
     ]
 
 
@@ -176,6 +216,8 @@ def _get_version(path: str, version_flag: str) -> Optional[str]:
 def feature_status(tools: List[Tool]) -> List[Feature]:
     by_name = {t.name: t for t in tools}
     have = lambda n: by_name.get(n) is not None and by_name[n].found  # noqa: E731
+    have_any_js_runtime = have("node") or have("bun") or have("deno")
+    have_any_po_token_tool = have_any_js_runtime or have("bgutil-pot")
 
     return [
         Feature(
@@ -213,6 +255,17 @@ def feature_status(tools: List[Tool]) -> List[Feature]:
             name="Upscale (algorithm='realesrgan')",
             available=have("ffmpeg") and have("realesrgan"),
             requires=["ffmpeg", "realesrgan"],
+        ),
+        Feature(
+            name="PO token auto-generation (for ATTESTATION_REQUIRED)",
+            available=have_any_po_token_tool,
+            requires=["any of: node, bun, deno, bgutil-pot"],
+            note=(
+                "Without a generator, you can still pass a static PO "
+                "token via --po-token <TOKEN> (extract from your "
+                "browser's DevTools)."
+                if not have_any_po_token_tool else ""
+            ),
         ),
     ]
 
@@ -519,13 +572,8 @@ def render_status(tools: List[Tool], features: List[Feature]) -> str:
             out.append(f"  [OK]   {t.name:<13}  {ver}")
             out.append(f"         path:    {t.path}")
         else:
-            label = "[--]   "
-            hint = (
-                f"  (run: pyt --doctor --install {t.name})"
-                if t.installable else
-                "  (ships with ffmpeg)"
-            )
-            out.append(f"  {label}{t.name:<13}  not installed{hint}")
+            hint = _missing_hint(t)
+            out.append(f"  [--]   {t.name:<13}  not installed{hint}")
         out.append(f"         used by: {t.description}")
     out.append("")
 
@@ -555,3 +603,19 @@ def _is_present(tools: List[Tool], name: str) -> bool:
         if t.name == name:
             return t.found
     return False
+
+
+_MANUAL_INSTALL_HINTS = {
+    "ffprobe": "  (ships with ffmpeg)",
+    "node":   "  (install: https://nodejs.org)",
+    "bun":    "  (install: https://bun.sh)",
+    "deno":   "  (install: https://deno.com)",
+    "bgutil-pot": "  (install: https://github.com/Brainicism/bgutil-ytdlp-pot-provider)",
+}
+
+
+def _missing_hint(tool: Tool) -> str:
+    """Render the per-tool "how do I install this?" suffix."""
+    if tool.installable:
+        return f"  (run: pyt --doctor --install {tool.name})"
+    return _MANUAL_INSTALL_HINTS.get(tool.name, "")

@@ -36,9 +36,9 @@ from pyt.api._merge import (
     pick_merge_container_for_streams,
     run_ffmpeg_merge,
 )
-from pyt.api.errors import DownloadError, PostProcessError
+from pyt.api.errors import AttestationRequired, DownloadError, PostProcessError
 from pyt.helpers import target_directory
-from pyt.sabr.session import SabrError, SabrSession
+from pyt.sabr.session import SabrAttestationRequired, SabrError, SabrSession
 
 if TYPE_CHECKING:
     from pyt.api.pipeline import PipelineStep
@@ -160,7 +160,31 @@ class CombinedDownload:
 
         parts = self._open_parts(target_dir, stem)
         try:
-            self._drive_sabr_session(parts)
+            try:
+                self._drive_sabr_session(parts)
+            except AttestationRequired as exc:
+                # If the Client has a po_token provider, ask it for a
+                # fresh token, update the legacy monostate, and retry
+                # the SABR session once. We rebuild the part files
+                # (truncate + reopen) to start fresh — yt-dlp does the
+                # same on PO-token-driven retries.
+                if not self._try_refresh_po_token():
+                    raise
+                logger.info(
+                    "CombinedDownload: retrying SABR with refreshed PO token"
+                )
+                # Reset part files for a clean second attempt.
+                for p in parts:
+                    p.fh.close()
+                parts = self._open_parts(target_dir, stem)
+                try:
+                    self._drive_sabr_session(parts)
+                except AttestationRequired:
+                    logger.warning(
+                        "CombinedDownload: ATTESTATION_REQUIRED still firing "
+                        "after PO token refresh; propagating"
+                    )
+                    raise
             self._finish_with_range_fallback(parts)
 
             for p in parts:
@@ -287,8 +311,25 @@ class CombinedDownload:
                 p.fh.write(chunk)
                 p.written += len(chunk)
                 self._fire_progress(itag, chunk, p)
+        except SabrAttestationRequired as exc:
+            # Treat ATTESTATION_REQUIRED specially — the byte-range
+            # fallback won't help because YouTube's enforcement is at
+            # the account/session level, not the protocol level.
+            # Translate to the typed AttestationRequired error so the
+            # caller can refresh a PO token and retry.
+            logger.info(
+                "CombinedDownload: ATTESTATION_REQUIRED on itag=%d/%d "
+                "for video_id=%s",
+                self._video_stream.itag, self._audio_stream.itag,
+                self._video.video_id,
+            )
+            raise AttestationRequired(
+                video_id=self._video.video_id,
+                url=self._video.url,
+                message=str(exc),
+            ) from exc
         except SabrError as exc:
-            # Don't fail the whole download — let the range-fallback path
+            # Other SABR failures — let the range-fallback path
             # finish whatever's missing.
             logger.warning("SABR session ended with error (%s); falling back to range", exc)
 
@@ -338,6 +379,35 @@ class CombinedDownload:
             p.fh.write(chunk)
             p.written += len(chunk)
             self._fire_progress(p.itag, chunk, p)
+
+    def _try_refresh_po_token(self) -> bool:
+        """Ask the parent :class:`Client` for a fresh PO token and write
+        it back to the legacy monostate so the next SABR session picks
+        it up. Returns ``True`` on success, ``False`` if no provider is
+        configured or the provider failed.
+        """
+        client = getattr(self._video, "_client", None)
+        if client is None or not getattr(client, "has_po_token_provider", False):
+            logger.info(
+                "CombinedDownload: no po_token provider on the parent "
+                "Client; cannot retry"
+            )
+            return False
+        try:
+            new_token = client.refresh_po_token()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "CombinedDownload: po_token refresh failed: %s", exc,
+            )
+            return False
+        if not new_token:
+            return False
+        self._video.legacy.stream_monostate.po_token = new_token
+        logger.info(
+            "CombinedDownload: refreshed po_token (%d chars) for video_id=%s",
+            len(new_token), self._video.video_id,
+        )
+        return True
 
     def _fire_progress(self, itag: int, chunk: bytes, p: _PartFile) -> None:
         """Forward to the legacy on_progress callback (still wired through

@@ -55,6 +55,10 @@ class Video:
         self._legacy = legacy
         self._meta = meta
         self._streams: Optional[StreamSet] = None
+        # Filled in by Client.video() so the download path can ask
+        # the client to refresh the PO token on AttestationRequired.
+        # Stays None for direct Video construction (e.g. in tests).
+        self._client = None  # type: Optional[Any]
 
     # ── construction ────────────────────────────────────────────────────────
 

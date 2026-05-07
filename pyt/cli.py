@@ -917,6 +917,22 @@ def _parse_args(
         "--po-token", metavar="TOKEN",
         help="Proof-of-origin token (base64url). Obtain with: yt-dlp --get-po-token <url>",
     )
+    parser.add_argument(
+        "--po-token-cmd", metavar="CMD",
+        help=(
+            "Command that prints a PO token to stdout. Run on first use "
+            "and on every ATTESTATION_REQUIRED retry. Example: "
+            "--po-token-cmd 'bgutil-pot --visitor-data $VD'"
+        ),
+    )
+    parser.add_argument(
+        "--po-token-script", metavar="FILE",
+        help=(
+            "Path to a JS script that prints a PO token. Runs with the "
+            "first available JS runtime on PATH (node / bun / deno). "
+            "Run: pyt --doctor to see what's installed."
+        ),
+    )
     parser.add_argument("--geo-bypass", action="store_true")
     parser.add_argument("--geo-bypass-country", metavar="CC")
     parser.add_argument("--sleep-interval", metavar="N", type=float)
@@ -1103,6 +1119,50 @@ def _iter_batch_urls(path: str) -> List[str]:
     return urls
 
 
+def _resolve_po_token(args) -> Optional[str]:
+    """Reduce ``--po-token`` / ``--po-token-cmd`` / ``--po-token-script``
+    to a single token string. Runs the generator once at startup; the
+    legacy CLI's :class:`YouTube` doesn't support auto-retry, so a
+    long-running download with a stale token would need to be re-run.
+    Use the modern :class:`pyt.Client` API for auto-retry.
+    """
+    set_count = sum(
+        1 for v in (
+            getattr(args, "po_token", None),
+            getattr(args, "po_token_cmd", None),
+            getattr(args, "po_token_script", None),
+        ) if v
+    )
+    if set_count > 1:
+        _print_err(
+            "pass at most one of: --po-token, --po-token-cmd, --po-token-script"
+        )
+        sys.exit(1)
+
+    if getattr(args, "po_token", None):
+        return args.po_token
+
+    if getattr(args, "po_token_cmd", None):
+        from pyt.api.po_token import CommandProvider
+        try:
+            sys.stdout.write(f"  {DM}Generating PO token via command …{R}\n")
+            return CommandProvider(args.po_token_cmd).get()
+        except Exception as exc:  # noqa: BLE001
+            _print_err(f"po_token command failed: {exc}")
+            sys.exit(1)
+
+    if getattr(args, "po_token_script", None):
+        from pyt.api.po_token import ScriptProvider
+        try:
+            sys.stdout.write(f"  {DM}Generating PO token via JS script …{R}\n")
+            return ScriptProvider(args.po_token_script).get()
+        except Exception as exc:  # noqa: BLE001
+            _print_err(f"po_token script failed: {exc}")
+            sys.exit(1)
+
+    return None
+
+
 def _setup_cookies(args) -> None:
     """Install cookies into pyt's request layer if requested."""
     if getattr(args, "cookies", None):
@@ -1252,6 +1312,11 @@ def main() -> None:
     # Network setup
     _setup_cookies(args)
     _setup_geo_bypass(args)
+
+    # Resolve PO token once at startup. We mutate args.po_token in place
+    # so the existing legacy code path below still uses `args.po_token`
+    # without further changes.
+    args.po_token = _resolve_po_token(args)
 
     # Proxy (proxies dict is passed per-YouTube instance below)
     proxies = None
