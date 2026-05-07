@@ -590,8 +590,14 @@ What's missing / works but not great:
   byte-range fallback for whatever bytes SABR doesn't deliver. The legacy
   `Stream.download()` path still opens one session per stream; no plans
   to back-port — migrate to `Client.video(...).download_best(...)`.
-- **Tests on recorded UMP fixtures.** Coming. For now SABR is exercised by
-  end-to-end downloads only, which means failures land in your terminal first.
+- **Tests on recorded UMP fixtures** — done. The SABR + UMP layers
+  have 80+ fixture-driven tests covering single-format completion,
+  multi-format multiplex, attestation, redirects, error-then-refresh,
+  ad-scope backoff (and the cap-outside-ads behavior that keeps VOD
+  downloads from crawling), playback-cookie propagation, stall
+  detection, gzip-encoded responses, context-update sending policies,
+  and player-time advancement to the buffered edge. Builders live in
+  `tests/sabr_fixtures.py` so adding scenarios is one-liner work.
 
 If something downloads slow or 403s, file an issue with the URL and your
 client (anonymized — no account info needed). I do this in spare time so
