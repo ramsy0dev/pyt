@@ -381,6 +381,75 @@ def test_segmented_stream_on_404(cipher_signature):
                 mock_open.assert_called_once_with(fp, 'wb')
 
 
+def test_download_raises_when_short(cipher_signature, tmp_path):
+    """SABR-incomplete that the byte-range fallback also failed to
+    finish should NOT silently report success. The user's downstream
+    merge would otherwise inherit a truncated file and produce a
+    4-second output from a 2-minute video."""
+    stream = cipher_signature.streams[0]
+    # Pretend the stream's expected size is 1 MB.
+    stream._filesize = 1_000_000
+    # Bypass the SABR path so request.stream is the real call site.
+    stream._monostate.sabr_url = None
+
+    target_dir = str(tmp_path)
+
+    # Earlier tests mutate os.path.getsize directly (not via mock.patch),
+    # which leaks into ours. Pin it to the actual disk value so the size
+    # check sees the truth.
+    real_getsize = os.path.getsize.__wrapped__ if hasattr(os.path.getsize, "__wrapped__") else os.path.getsize
+    with mock.patch("os.path.getsize", return_value=100), \
+         mock.patch(
+             "pyt.streams.request.stream",
+             return_value=iter([b"x" * 100]),
+         ):
+        with pytest.raises(IOError, match="download incomplete"):
+            stream.download(output_path=target_dir, filename="short")
+
+
+def test_download_warns_when_slightly_short(cipher_signature, tmp_path, caplog):
+    """A small shortfall (within tolerance) should warn but not raise —
+    occasionally byte-range responses are a few bytes off."""
+    stream = cipher_signature.streams[0]
+    stream._filesize = 1_000_000
+    stream._monostate.sabr_url = None
+
+    target_dir = str(tmp_path)
+
+    with mock.patch("os.path.getsize", return_value=999_500), \
+         mock.patch(
+             "pyt.streams.request.stream",
+             return_value=iter([b"x" * 999_500]),  # 0.05% short
+         ):
+        with caplog.at_level("WARNING", logger="pyt.streams"):
+            stream.download(output_path=target_dir, filename="slightly_short")
+
+    assert any("short of expected" in r.message for r in caplog.records)
+
+
+def test_download_skips_size_check_for_segmented_fallback(cipher_signature, tmp_path):
+    """contentLength is unreliable for DASH segmented streams — the size
+    check must skip when seq_stream was used, otherwise we'd reject
+    legitimate downloads."""
+    stream = cipher_signature.streams.filter(adaptive=True)[0]
+    stream._filesize = 1_000_000  # huge expected size; segments deliver tiny
+    stream._monostate.sabr_url = None
+
+    target_dir = str(tmp_path)
+
+    # request.stream raises 403 → triggers seq_stream fallback.
+    # seq_stream delivers 3 bytes total. With the size check skipped
+    # for segmented mode, this should succeed without IOError.
+    with mock.patch(
+        "pyt.streams.request.stream",
+        side_effect=HTTPError('', 403, 'Forbidden', {}, None),
+    ), mock.patch(
+        "pyt.streams.request.seq_stream",
+        return_value=iter([b"abc"]),
+    ), mock.patch("os.path.getsize", return_value=3):
+        stream.download(output_path=target_dir, filename="seg_short")
+
+
 def test_segmented_only_catches_404(cipher_signature):
     stream = cipher_signature.streams.filter(adaptive=True)[0]
     with mock.patch('pyt.request.stream') as mock_stream:

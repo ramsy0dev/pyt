@@ -13,6 +13,7 @@ import time
 import random
 import warnings
 import datetime as dt
+from pathlib import Path
 import pyt.exceptions as exceptions
 from urllib.error import HTTPError
 
@@ -652,6 +653,13 @@ def _ffmpeg_downloader(
     cmd = [
         ffmpeg_bin, "-y",
         "-loglevel", "warning", "-nostats",
+        # Drop corrupt packets rather than halting on the first bad one.
+        # Without these, libdav1d giving up on a truncated AV1 stream
+        # leaves the muxer with a 4-second output from a 2-minute source
+        # (silently — exit code is still 0). See pyt.api._merge for the
+        # same hardening in the modern path.
+        "-fflags", "+discardcorrupt",
+        "-err_detect", "ignore_err",
         "-i", video_path,
         "-i", audio_path,
         "-map", "0:v:0",
@@ -676,6 +684,31 @@ def _ffmpeg_downloader(
             except OSError:
                 pass
         sys.exit(1)
+
+    # ffmpeg returned 0 — but with -c copy + libdav1d/libaom, an exit code
+    # of 0 doesn't actually mean "muxed everything." Compare durations to
+    # catch the silently-truncated case where we'd otherwise tell the user
+    # "Saved" for a 4-second clip from a 2-minute video.
+    from pyt.api._merge import probe_duration
+    out_dur = probe_duration(Path(final_path))
+    if out_dur is not None:
+        in_durs = [probe_duration(Path(p)) for p in (video_path, audio_path)]
+        in_durs = [d for d in in_durs if d is not None]
+        if in_durs:
+            expected = max(in_durs)
+            if expected > 0 and out_dur < expected * 0.9:
+                _print_err(
+                    f"merge produced {out_dur:.1f}s of output but the inputs "
+                    f"are ~{expected:.1f}s — the video stream is likely "
+                    f"corrupt or truncated. Source files preserved at:\n"
+                    f"  {video_path}\n  {audio_path}\n"
+                    f"Try re-downloading."
+                )
+                try:
+                    os.unlink(final_path)
+                except OSError:
+                    pass
+                sys.exit(1)
 
     # Merge succeeded — now safe to drop sources.
     for p in (video_path, audio_path):

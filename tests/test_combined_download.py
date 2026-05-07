@@ -39,6 +39,152 @@ def test_pick_merge_container_for_streams():
     assert pick_merge_container_for_streams(v, a) == "mp4"
 
 
+# ── run_ffmpeg_merge: -fflags + post-merge duration validation ─────────────
+
+
+def test_run_ffmpeg_merge_passes_discardcorrupt_flag(tmp_path):
+    """Without -fflags +discardcorrupt the muxer halts on the first bad
+    packet from libdav1d/libaom. Verify the flag is on the command line."""
+    from pyt.api._merge import run_ffmpeg_merge
+
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        return mock.Mock(returncode=0, stderr=b"")
+
+    video_in = tmp_path / "v.mp4"
+    audio_in = tmp_path / "a.m4a"
+    output = tmp_path / "out.mp4"
+    for p in (video_in, audio_in):
+        p.write_bytes(b"x")
+
+    with mock.patch("pyt.api._merge.shutil.which", return_value="/usr/bin/ffmpeg"), \
+         mock.patch("pyt.api._merge.subprocess.run", side_effect=fake_run), \
+         mock.patch("pyt.api._merge.probe_duration", return_value=None):
+        # probe_duration returns None for both inputs and output → validation
+        # is a no-op, so we can test just the argv shape here.
+        run_ffmpeg_merge(video_in, audio_in, output)
+
+    cmd = captured["cmd"]
+    assert "-fflags" in cmd
+    assert cmd[cmd.index("-fflags") + 1] == "+discardcorrupt"
+    assert "-err_detect" in cmd
+    assert cmd[cmd.index("-err_detect") + 1] == "ignore_err"
+
+
+def test_run_ffmpeg_merge_validates_output_duration(tmp_path):
+    """ffmpeg returning 0 doesn't mean the output is good. If the output
+    is much shorter than the inputs, fail loudly."""
+    from pyt.api._merge import run_ffmpeg_merge
+
+    video_in = tmp_path / "v.mp4"
+    audio_in = tmp_path / "a.m4a"
+    output = tmp_path / "out.mp4"
+    for p in (video_in, audio_in):
+        p.write_bytes(b"x")
+
+    # Simulate the user's report: 4.5s output from 127s inputs.
+    duration_for = {
+        str(video_in): 127.4,
+        str(audio_in): 127.5,
+        str(output): 4.5,
+    }
+
+    def fake_run(cmd, **kwargs):
+        # Pretend ffmpeg "succeeded" — the real bug is silent truncation.
+        Path(cmd[-1]).write_bytes(b"truncated")
+        return mock.Mock(returncode=0, stderr=b"")
+
+    def fake_probe(path):
+        return duration_for.get(str(path))
+
+    with mock.patch("pyt.api._merge.shutil.which", return_value="/usr/bin/ffmpeg"), \
+         mock.patch("pyt.api._merge.subprocess.run", side_effect=fake_run), \
+         mock.patch("pyt.api._merge.probe_duration", side_effect=fake_probe):
+        with pytest.raises(FFmpegMergeError) as exc_info:
+            run_ffmpeg_merge(video_in, audio_in, output)
+
+    msg = str(exc_info.value)
+    assert "4.5" in msg or "4.5s" in msg
+    assert "127" in msg
+    # Output is removed so the user doesn't accidentally use the broken file.
+    assert not output.exists()
+
+
+def test_run_ffmpeg_merge_accepts_normal_output(tmp_path):
+    """Output within tolerance of inputs is fine — don't false-positive."""
+    from pyt.api._merge import run_ffmpeg_merge
+
+    video_in = tmp_path / "v.mp4"
+    audio_in = tmp_path / "a.m4a"
+    output = tmp_path / "out.mp4"
+    for p in (video_in, audio_in):
+        p.write_bytes(b"x")
+
+    # ffmpeg's -shortest can trim a few hundred ms; this is well within tolerance.
+    duration_for = {
+        str(video_in): 127.4,
+        str(audio_in): 127.0,
+        str(output): 127.0,
+    }
+
+    def fake_run(cmd, **kwargs):
+        Path(cmd[-1]).write_bytes(b"good")
+        return mock.Mock(returncode=0, stderr=b"")
+
+    def fake_probe(path):
+        return duration_for.get(str(path))
+
+    with mock.patch("pyt.api._merge.shutil.which", return_value="/usr/bin/ffmpeg"), \
+         mock.patch("pyt.api._merge.subprocess.run", side_effect=fake_run), \
+         mock.patch("pyt.api._merge.probe_duration", side_effect=fake_probe):
+        result = run_ffmpeg_merge(video_in, audio_in, output)
+
+    assert result == output
+    assert output.exists()
+
+
+def test_run_ffmpeg_merge_skips_validation_without_ffprobe(tmp_path):
+    """No ffprobe = we can't validate. Don't fail merges over that."""
+    from pyt.api._merge import run_ffmpeg_merge
+
+    video_in = tmp_path / "v.mp4"
+    audio_in = tmp_path / "a.m4a"
+    output = tmp_path / "out.mp4"
+    for p in (video_in, audio_in):
+        p.write_bytes(b"x")
+
+    def fake_run(cmd, **kwargs):
+        Path(cmd[-1]).write_bytes(b"y")
+        return mock.Mock(returncode=0, stderr=b"")
+
+    with mock.patch("pyt.api._merge.shutil.which", return_value="/usr/bin/ffmpeg"), \
+         mock.patch("pyt.api._merge.subprocess.run", side_effect=fake_run), \
+         mock.patch("pyt.api._merge.probe_duration", return_value=None):
+        result = run_ffmpeg_merge(video_in, audio_in, output)
+
+    assert result == output
+
+
+def test_probe_duration_parses_format_duration(tmp_path):
+    from pyt.api._merge import probe_duration
+
+    with mock.patch("pyt.api._merge.shutil.which", return_value="/usr/bin/ffprobe"), \
+         mock.patch(
+             "pyt.api._merge.subprocess.run",
+             return_value=mock.Mock(stdout=b"127.456\n"),
+         ):
+        assert probe_duration(tmp_path / "v.mp4") == pytest.approx(127.456)
+
+
+def test_probe_duration_returns_none_when_ffprobe_missing(tmp_path):
+    from pyt.api._merge import probe_duration
+
+    with mock.patch("pyt.api._merge.shutil.which", return_value=None):
+        assert probe_duration(tmp_path / "v.mp4") is None
+
+
 # ── StreamSet.best_pair ────────────────────────────────────────────────────
 
 

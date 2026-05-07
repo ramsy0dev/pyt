@@ -454,6 +454,7 @@ def test_ffmpeg_downloader(unique_name, download, run, _which, unlink):
     video_stream.id = "video_id"
     video_stream.subtype = "mp4"
     video_stream.video_codec = "avc1.640028"
+    video_stream.title = "safe_title"  # safe_filename needs a real string
     unique_name.side_effect = ["video_name", "audio_name"]
     run.return_value = mock.Mock(returncode=0, stderr=b"")
 
@@ -464,7 +465,14 @@ def test_ffmpeg_downloader(unique_name, download, run, _which, unlink):
 
     # Then
     download.assert_called()
-    args, kwargs = run.call_args
+    # The merge code now also invokes ffprobe for duration validation, so
+    # call_args (the last call) is the ffprobe one. Find the ffmpeg invocation
+    # in the call list explicitly.
+    ffmpeg_calls = [
+        c for c in run.call_args_list if c.args and c.args[0] and "-map" in c.args[0]
+    ]
+    assert ffmpeg_calls, "ffmpeg merge invocation not found in subprocess.run calls"
+    args, kwargs = ffmpeg_calls[0]
     cmd = args[0]
     assert cmd[0] == "/usr/bin/ffmpeg"
     assert "-map" in cmd and "0:v:0" in cmd and "1:a:0" in cmd
@@ -490,6 +498,7 @@ def test_ffmpeg_downloader_failure_keeps_sources(unique_name, download, run, _wh
     video_stream = MagicMock()
     video_stream.subtype = "mp4"
     video_stream.video_codec = "avc1.640028"
+    video_stream.title = "safe_title"  # safe_filename needs a real string
     unique_name.side_effect = ["video_name", "audio_name"]
     run.return_value = mock.Mock(returncode=1, stderr=b"some ffmpeg error")
 

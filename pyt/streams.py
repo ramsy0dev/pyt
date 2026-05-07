@@ -381,6 +381,7 @@ class Stream:
                         fh.truncate()
                         bytes_remaining = self.filesize
 
+            used_seq_stream = False
             try:
                 for chunk in request.stream(
                     self.url,
@@ -398,6 +399,7 @@ class Stream:
                 fh.seek(0)
                 fh.truncate()
                 bytes_remaining = self.filesize
+                used_seq_stream = True
                 for chunk in request.seq_stream(
                     self.url,
                     timeout=timeout,
@@ -405,6 +407,40 @@ class Stream:
                 ):
                     bytes_remaining -= len(chunk)
                     self.on_progress(chunk, fh, bytes_remaining)
+
+        # Final size check. SABR + byte-range fallbacks each have their own
+        # ways to terminate early without raising, and historically
+        # on_complete fired regardless of how many bytes actually landed —
+        # producing "Saved" terminal output for files that were 40% short
+        # and silently broken. The mp4 muxer is permissive enough that the
+        # damage shows up later, in the merge step, as a 4-second output
+        # from a 2-minute input. Catch it here instead.
+        #
+        # Skip when:
+        #   - we used the segmented seq_stream fallback (contentLength
+        #     is unreliable for DASH segments — they don't sum to it),
+        #   - we don't have a real Content-Length to compare against,
+        #   - the file isn't actually on disk (test mocks of open).
+        if self._filesize and self._filesize > 0 and not used_seq_stream:
+            try:
+                actual = os.path.getsize(file_path)
+            except OSError:
+                actual = None
+            if actual is not None:
+                shortfall = self._filesize - actual
+                if shortfall > self._filesize * 0.01:
+                    raise IOError(
+                        f"download incomplete: got {actual} bytes, "
+                        f"expected {self._filesize} ({shortfall} short). "
+                        f"This usually means SABR throttling kicked the session "
+                        f"and the byte-range fallback also came up short — "
+                        f"retry the download."
+                    )
+                if shortfall > 0:
+                    logger.warning(
+                        "download finished %d bytes short of expected %d (within tolerance)",
+                        shortfall, self._filesize,
+                    )
         self.on_complete(file_path)
         return file_path
 
