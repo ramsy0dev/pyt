@@ -34,6 +34,7 @@ from pyt.api.client import Client
 from pyt.api.video import Video
 from pyt.api.streams import StreamSet, StreamRef
 from pyt.api.download import Download, ProgressEvent
+from pyt.api.combined import CombinedDownload
 from pyt.api.playlists import Playlist, ChannelFeed, SearchResults
 from pyt.api import pipeline
 
@@ -43,6 +44,7 @@ __all__ = [
     "StreamSet",
     "StreamRef",
     "Download",
+    "CombinedDownload",
     "ProgressEvent",
     "Playlist",
     "ChannelFeed",

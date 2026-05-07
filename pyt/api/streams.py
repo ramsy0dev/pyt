@@ -340,6 +340,61 @@ class StreamSet(Sequence[StreamRef]):
             )
         return self._streams[0]
 
+    def best_pair(
+        self,
+        *,
+        prefer_resolution: Optional[str] = None,
+    ) -> Tuple[StreamRef, StreamRef]:
+        """Pick the best adaptive video + best audio.
+
+        :param prefer_resolution: e.g. ``"1080p"``. When unset, picks the
+            highest available. When set, picks the highest at-or-below that
+            value (so a request for 4K on a 1080p video doesn't error —
+            it returns the highest available, which is useful in CLIs).
+
+        Raises :class:`NoMatchingStream` if there is no adaptive video
+        track or no audio track. Source: this method always works on
+        ``self`` — call it on the *full* :class:`StreamSet` from
+        :attr:`Video.streams`, not on a pre-filtered subset.
+        """
+        videos = [s for s in self._streams if s.kind == "video" and s.is_adaptive]
+        if not videos:
+            raise NoMatchingStream(
+                "no adaptive video streams available",
+                video_id=self._video.video_id,
+            )
+
+        if prefer_resolution is not None:
+            cap = _resolution_to_int(prefer_resolution)
+            if cap is not None:
+                capped = [s for s in videos if (_resolution_to_int(s.resolution) or 0) <= cap]
+                if capped:
+                    videos = capped
+
+        video_stream = max(
+            videos,
+            key=lambda s: (
+                _resolution_to_int(s.resolution) or 0,
+                s.fps or 0,
+                s.bitrate or 0,
+            ),
+        )
+
+        audios = [s for s in self._streams if s.kind == "audio"]
+        if not audios:
+            raise NoMatchingStream(
+                "no audio streams available",
+                video_id=self._video.video_id,
+            )
+        audio_stream = max(
+            audios,
+            key=lambda s: (
+                _parse_threshold(s.abr) or (s.bitrate // 1000 if s.bitrate else 0),
+                s.bitrate or 0,
+            ),
+        )
+        return video_stream, audio_stream
+
     # ── private ─────────────────────────────────────────────────────────────
 
     def _where(self, predicate: Callable[[StreamRef], bool]) -> "StreamSet":

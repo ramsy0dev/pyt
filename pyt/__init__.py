@@ -34,6 +34,7 @@ from pyt.api import (
     StreamSet,
     StreamRef,
     Download,
+    CombinedDownload,
     ChannelFeed,
     SearchResults,
     pipeline,

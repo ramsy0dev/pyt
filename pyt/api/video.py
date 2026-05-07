@@ -151,6 +151,43 @@ class Video:
             self._streams = StreamSet._from_legacy(fmt_streams, video=self)
         return self._streams
 
+    # ── combined download ──────────────────────────────────────────────────
+
+    def download_best(
+        self,
+        output_path: Optional[str] = None,
+        *,
+        prefer_resolution: Optional[str] = None,
+        filename: Optional[str] = None,
+        container: Optional[str] = None,
+        timeout: Optional[int] = None,
+    ):
+        """Pick the best adaptive video + audio pair and run them through
+        a single multiplexed SABR session, then merge with ffmpeg.
+
+        :param prefer_resolution: e.g. ``"1080p"``. When unset, picks the
+            highest available adaptive video. When the requested resolution
+            isn't available, returns the highest one at-or-below it.
+        :param container: override the merge container. Auto-detected from
+            the codec pair by default (mp4 / webm / mkv).
+        :returns: a :class:`CombinedDownload` builder. Call ``.run()`` (or
+            chain post-processing with ``.then(...)`` / ``|``) to execute.
+        """
+        from pyt.api.combined import CombinedDownload
+
+        video_stream, audio_stream = self.streams.best_pair(
+            prefer_resolution=prefer_resolution,
+        )
+        return CombinedDownload(
+            video=self,
+            video_stream=video_stream,
+            audio_stream=audio_stream,
+            output_path=output_path,
+            filename=filename,
+            container=container,
+            timeout=timeout,
+        )
+
     # ── escape hatch ────────────────────────────────────────────────────────
 
     @property

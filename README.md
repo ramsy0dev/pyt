@@ -106,12 +106,43 @@ video.streams.audio.best().download_to("downloads/").run()
 
 # Specific resolution
 video.streams.video.filter(resolution="1080p").best().download_to().run()
+
+# Best adaptive video + audio merged in one go (one SABR session, ffmpeg merge)
+video.download_best("downloads/").run()
+video.download_best("downloads/", prefer_resolution="1080p").run()
 ```
 
 `Client` accepts `proxy=`, `cookies=`, `cookies_from_browser=`, `po_token=`,
 `use_oauth=`, plus `on_progress` / `on_complete` callbacks. The session
 state lives on the client — there are no module-level globals you need
 to reason about across instances.
+
+### Combined adaptive download (SABR multi-format)
+
+`video.download_best(...)` runs both the video-only and audio streams
+through **one** multiplexed SABR session and merges the result with
+ffmpeg. The single-stream path opens an independent `SabrSession` per
+stream, which YouTube's server treats as two separate users — each with
+its own throttle decisions, ad-enforcement context, and playback cookie.
+Multiplexing is what real players do; this matches them.
+
+```python
+from pyt import Client, pipeline as pp
+
+video = Client().video(url)
+
+# Auto-pick best video + audio, merge, then attach metadata
+path = (
+    video.download_best("downloads/")
+        | pp.embed_metadata()
+        | pp.embed_thumbnail()
+).run()
+```
+
+If SABR can't deliver every byte for either format (throttle, 403,
+session expiry), the missing tail is finished via byte-range request —
+a 99%-complete download won't die from one bad SABR exchange. Use
+`prefer_resolution=` to cap quality (e.g. `"1080p"` on a 4K source).
 
 ### Post-processing — declarative pipeline
 
@@ -339,9 +370,12 @@ What's missing / works but not great:
   it'll work.
 - **Live streams.** Metadata yes, downloads no. SABR live needs `SABR_SEEK` /
   `LIVE_METADATA` handling we haven't wired up.
-- **Multi-format download orchestrator.** SabrSession can multiplex but
-  `Stream.download()` still opens one session per stream. Fixing this is
-  next on the list — see ADR notes in commits.
+- **Multi-format download orchestrator** — done in the new API. Use
+  `video.download_best(...)` (or construct `pyt.CombinedDownload` directly)
+  to run video+audio over a single multiplexed SABR session, with a
+  byte-range fallback for whatever bytes SABR doesn't deliver. The legacy
+  `Stream.download()` path still opens one session per stream; no plans
+  to back-port — migrate to `Client.video(...).download_best(...)`.
 - **Tests on recorded UMP fixtures.** Coming. For now SABR is exercised by
   end-to-end downloads only, which means failures land in your terminal first.
 
