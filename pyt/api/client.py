@@ -4,7 +4,7 @@ Construct one ``Client`` per "user" (process, FastAPI app, notebook). It
 holds the proxy config, cookies, OAuth flag, and PO token, and produces
 :class:`Video` instances. The legacy :class:`pyt.YouTube` global state
 (``pyt.__js__``, ``pyt.__js_url__``, ``Monostate``) is still touched
-internally — fully decoupling from it is a v2 task.
+internally — fully decoupling from it is a v3 task.
 """
 from __future__ import annotations
 
@@ -203,7 +203,7 @@ class Client:
     def _ensure_cookies_installed(self) -> None:
         """Cookies are installed once per client. The legacy hook patches
         the module-level :func:`pyt.request._execute_request` — that's a
-        global mutation we inherit from the old code path. v2 will lift
+        global mutation we inherit from the old code path. v3 will lift
         this onto the client itself.
         """
         if self._cookies_installed:

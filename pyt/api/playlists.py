@@ -5,7 +5,7 @@ The shape mirrors :class:`pyt.api.Video`: construction is the I/O moment,
 attributes are pure, and iterating yields modern :class:`Video` objects.
 
 The async-iteration and progressive paging shape from the design proposal
-is left for v2 — for now ``Playlist.videos`` is a synchronous lazy
+is left for v3 — for now ``Playlist.videos`` is a synchronous lazy
 generator, which preserves the legacy memory characteristics (one HTTP
 fetch per video at iteration time).
 """

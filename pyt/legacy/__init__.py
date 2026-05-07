@@ -7,7 +7,7 @@ twofold:
 1. Make it grep-able which call sites are still on the old API
    (``from pyt.legacy import YouTube`` is unambiguous).
 2. Survive the eventual removal of the same names from the top-level
-   ``pyt`` namespace — a top-level ``YouTube`` will go away in v2, but
+   ``pyt`` namespace — a top-level ``YouTube`` will go away in v3, but
    ``pyt.legacy.YouTube`` will remain available for one more release
    to give users a migration window.
 

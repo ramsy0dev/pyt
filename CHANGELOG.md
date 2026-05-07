@@ -1,5 +1,223 @@
 # Changelog
 
+## 2.0.0 — 2026-05-08
+
+The "modern API" release. Adds a redesigned Python interface
+(`pyt.Client`), a doctor command that reports + auto-installs every
+external tool the library can use, structured logging, end-to-end
+PO-token support, an experimental upscaler, multi-format SABR
+multiplexing, and a fixture-driven test suite for the SABR/UMP
+layers.
+
+**Backward compatibility:** every legacy entry point still works.
+`pyt.YouTube`, `pyt.Playlist`, `pyt.Channel`, `pyt.Search`,
+`register_on_progress_callback`, and `register_on_complete_callback`
+emit `DeprecationWarning`. `from pyt.legacy import YouTube` is the
+explicit-import home. Top-level removal targets v3 — there is no
+forced migration in 2.x.
+
+**Test counts:** 1.1.0 shipped ~250 tests; 2.0.0 ships **624**, all
+passing.
+
+### Added
+
+#### Modern Python API (`pyt.Client`)
+
+A redesigned developer interface lives at `pyt.api` and is re-exported
+from `pyt`. The legacy `YouTube` / `Playlist` / `Stream` classes still
+exist; the new surface is opt-in but recommended for new code.
+
+- **`Client(...)`** — single entry point, owns proxy / cookies /
+  PO-token / OAuth state. Replaces the module-level `pyt.__js__` /
+  `pyt.__js_url__` / `Monostate` globals (legacy still touches them
+  internally; full decoupling is a v3 task).
+- **`Video`** — typed, frozen-dataclass-backed snapshot. Attribute
+  access is **pure**: no hidden network I/O. `client.video(url)` is
+  the I/O moment.
+- **`StreamSet`** — chainable, immutable filter view. `.audio` /
+  `.video` / `.progressive` / `.adaptive` shortcuts, `.filter`,
+  `.codec`, `.at_least`, `.order_by`, `.desc`, `.first`, `.last`,
+  `.best` (raises `NoMatchingStream` when empty), `.one` (raises if
+  not exactly one match), `.best_pair(prefer_resolution=)`.
+- **`Download`** builder — lazy; call `.run()` to execute. Pipeline
+  composition via `.then(step, ...)` or the `|` operator.
+- **`pipeline.*`** — declarative post-processing factories:
+  `sponsorblock(mark=...)`, `embed_metadata()`, `embed_thumbnail()`,
+  `embed_subtitles(lang=)`, `extract_audio(format=)`, `upscale(...)`.
+- **`Playlist` / `ChannelFeed` / `SearchResults`** — modern wrappers
+  over the legacy `Playlist` / `Channel` / `Search` classes; lazy
+  iteration yields `Video` objects.
+- **Typed error hierarchy** — `PytError` root with `VideoUnavailable`,
+  `AgeRestricted`, `LiveStreamNotSupported`, `AttestationRequired`,
+  `NoMatchingStream`, `DownloadError`, `PostProcessError`,
+  `ConfigError`. Every error carries `video_id` / `url` /
+  (where relevant) `client_used`.
+
+#### Combined adaptive download (multi-format SABR)
+
+`video.download_best(...)` (or `pyt.CombinedDownload` directly) drives
+**one** multiplexed SABR session for the chosen video + audio streams,
+then merges with ffmpeg. YouTube treats both formats as a single
+logical user (one playback cookie, one throttle decision, one
+ad-enforcement context) — matching real-player behavior. Per-format
+byte-range fallback finishes anything SABR doesn't deliver. Output
+duration is validated against the inputs after merge; a 4-second
+output from a 2-minute input now raises `DownloadError` instead of
+silently passing as success.
+
+The legacy `Stream.download()` path still opens one session per
+stream; no plans to back-port — migrate to `Client.video(url).download_best(...)`.
+
+#### Doctor command
+
+`pyt --doctor` reports which external tools are installed and which
+features that unlocks. `pyt --doctor --install <tool>` downloads the
+right asset for the current platform and drops it in `~/.pyt/bin/`,
+which pyt prepends to its own `PATH` at module import (process-local
+mutation; never touches your shell profile).
+
+| Tool | Auto-install support |
+|---|---|
+| ffmpeg / ffprobe | Windows x86_64 (gyan.dev), Linux x86_64 + arm64 (BtbN). macOS uses `brew install ffmpeg`. |
+| realesrgan-ncnn-vulkan | All three platforms (xinntao GitHub releases). |
+| pyt-po-token | All three platforms via npm into `~/.pyt/js/`. Requires Node 18+. |
+
+The doctor also detects (but doesn't auto-install) Node, Bun, Deno,
+and `bgutil-pot` — surfacing per-tool install URLs in the missing-hint
+column.
+
+#### PO-token support
+
+When SABR returns `STREAM_PROTECTION_STATUS=ATTESTATION_REQUIRED`,
+the modern API translates it to the typed `AttestationRequired`
+error. `Client(...)` accepts four ways to provide a token:
+
+- `po_token="abc..."` — static value (e.g. extracted from DevTools)
+- `po_token_provider=fn` — Python callable returning a fresh token
+- `po_token_cmd="bgutil-pot ..."` — shell out and read stdout
+- `po_token_script="/path/x.js"` — run a JS file with the first
+  available JS runtime on PATH (node / bun / deno; pyt picks node
+  first if multiple are present)
+
+Tokens are cached for 30 minutes (configurable); `CombinedDownload`
+auto-refreshes on `AttestationRequired` and retries the SABR session
+once. CLI flags: `--po-token`, `--po-token-cmd`, `--po-token-script`.
+
+`pyt --doctor --install po-token-generator` installs a working
+end-to-end generator (npm-installed `bgutils-js` + `youtubei.js`,
+plus a vendored launcher and a `pyt-po-token` wrapper). After install,
+`--po-token-cmd "pyt-po-token"` is the user-facing incantation.
+
+#### Experimental upscaler (`pp.upscale(...)`)
+
+Two algorithms, picked by `algorithm=`:
+
+- `"lanczos"` (default) — single-pass ffmpeg `scale=...:flags=lanczos`
+  + light unsharp filter. Real-time on any CPU. No extra installs.
+  Best at 2× (360→720, 720→1440); doesn't add detail the source
+  doesn't have, but produces a noticeably cleaner result than naive
+  bilinear or browser-side player upscaling.
+- `"realesrgan"` — Real-ESRGAN neural upscaler via the
+  `realesrgan-ncnn-vulkan` binary. **Chunked by default** so peak
+  intermediate disk drops from ~45 GB to ~6 GB on a 5-minute 720p × 4×
+  example. `chunk_seconds=` tunes the trade-off; `threads=` passes
+  through to the binary's `-j load:proc:save` for GPU throughput tuning.
+
+Emits a one-shot `FutureWarning` on first use. Source bytes are
+restored from a `.pre-upscale` backup if anything in the pipeline
+fails.
+
+#### Public logging API
+
+```python
+import pyt
+
+pyt.enable_logging("DEBUG")              # filter chains, picks, timings
+pyt.enable_logging("TRACE")              # everything, incl. per-chunk SABR
+pyt.enable_logging(file="/tmp/pyt.log")  # also write to file
+pyt.set_log_level("INFO")
+pyt.disable_logging()
+pyt.diagnostic_report()                  # bug-report dump (no user content)
+```
+
+Off by default — the library is silent until the consumer asks for
+it. Heavy DEBUG/INFO instrumentation across `Client`, `Video`,
+`StreamSet`, `Download`, `CombinedDownload`. CLI: `-v` for DEBUG,
+`-vv` for TRACE. `PYT_LOG_LEVEL=DEBUG` enables logging at import
+time without code changes.
+
+#### Other features
+
+- **`mutagen`** and **`browser-cookie3`** promoted from optional
+  extras to base dependencies. The cookie path is load-bearing for
+  the SABR mitigation; bundling them simplifies the install matrix.
+- **Stream download size validation** — `Stream.download()` now
+  raises `IOError` if the on-disk file is more than 1% short of the
+  reported `Content-Length`. Catches the silent-truncation case where
+  SABR delivered short, the byte-range fallback also came up short,
+  and `on_complete` fired regardless.
+- **ffmpeg merge hardening** — both the modern `_merge.py` path and
+  the legacy CLI's inline merge add `-fflags +discardcorrupt -err_detect
+  ignore_err` and validate the output's duration via ffprobe after
+  the merge. Output that's <90% of the longer input now raises
+  `DownloadError` (or exits 1 on the CLI) with the source files
+  preserved for retry.
+
+### Test coverage
+
+- **624 tests pass** (up from ~250 in 1.1.0).
+- **`tests/sabr_fixtures.py`** — fixture builders for UMP wire bytes.
+  Per-part-type helpers (`make_media_header`, `make_format_init`,
+  `make_sabr_redirect`, etc.) so adding scenarios is one-liner work
+  and protocol-format changes break at the helper rather than across
+  every test body.
+- **81 new SABR / UMP / proto tests** covering varint round-trips at
+  every size boundary, parser chunked delivery, single + multi-format
+  SABR exchanges, attestation, redirect, error-then-refresh,
+  ad-scope backoff cap, playback-cookie propagation, stall detection,
+  gzip-encoded responses, context-update sending policies, player-time
+  advancement, and resume seeding.
+
+### Deprecated
+
+The following emit `DeprecationWarning`. They still work and will be
+removed in v3 (one major release window of warnings). Use
+`from pyt.legacy import ...` for the explicit-import path.
+
+- `pyt.YouTube` (use `pyt.Client().video(url)`)
+- `pyt.YouTube.from_id` (same — pass a URL or an ID-formatted URL)
+- `pyt.Playlist` (use `Client().playlist(url)`)
+- `pyt.Channel` (use `Client().channel(url)`)
+- `pyt.Search` (use `Client().search(query)`)
+- `youtube.register_on_progress_callback` /
+  `register_on_complete_callback` (pass `on_progress=` /
+  `on_complete=` to `Client(...)`)
+
+### Fixed
+
+- ffmpeg merge silently producing a 4-second output from a 2-minute
+  input when libdav1d hit corrupt OBUs. Both the modern and CLI
+  merge paths now validate output duration via ffprobe.
+- `Stream.download()` reporting "Saved" for files that were 40% short.
+  Now raises `IOError` with retry guidance.
+- Doctor's "(ships with ffmpeg)" hint appearing on tools that don't
+  ship with ffmpeg (node, bun, deno, bgutil-pot, pyt-po-token).
+  Per-tool install URL hints replace it.
+- Test pollution from `test_download_with_existing` directly mutating
+  `os.path.getsize`. New tests pin `os.path.getsize` for their scope
+  rather than inheriting the leak.
+
+### Migration guide
+
+See [README.md](README.md#migrating-from-the-legacy-api) and
+[docs/features/python-api.md](docs/features/python-api.md). The
+12-row before/after table covers `YouTube` → `Client.video`,
+`Playlist` → `Client.playlist`, the four ways to provide PO tokens,
+the modern error names, and the silencing pattern for the
+deprecation warnings.
+
+---
+
 ## 1.1.0 — 2026-05-03
 
 Major feature release closing the gap with yt-dlp for YouTube-specific use cases.

@@ -1,6 +1,6 @@
 # Modern Python API
 
-`pyt.Client` is the v2 Python interface. The legacy `pyt.YouTube`,
+`pyt.Client` is the modern Python interface (debuted in 2.0). The legacy `pyt.YouTube`,
 `pyt.Playlist`, and friends still work but emit `DeprecationWarning`
 and will be removed from the top-level namespace in a future major
 release. New code should use `Client`.

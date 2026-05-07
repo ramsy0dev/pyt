@@ -43,7 +43,7 @@ for YouTube-specific use cases.
 | Tier | What's in it |
 |---|---|
 | **Stable** | All download, post-processing, playlist, search, cookie, proxy, archive features. CLI flags. The `pyt.Client` / `Video` / `Stream` / pipeline modern Python API. The doctor command. |
-| **Deprecated** | `pyt.YouTube`, `pyt.Playlist`, `pyt.Channel`, `pyt.Search`, `register_on_*_callback`. Still works; emits `DeprecationWarning`. Will move to `pyt.legacy.*` and be removed from the top-level namespace in v2. |
+| **Deprecated** | `pyt.YouTube`, `pyt.Playlist`, `pyt.Channel`, `pyt.Search`, `register_on_*_callback`. Still works in 2.x; emits `DeprecationWarning`. Will be removed from the top-level namespace in v3 — `from pyt.legacy import ...` is the explicit-import path that survives. |
 | **Experimental** | `pp.upscale(...)` — both `algorithm="lanczos"` and `algorithm="realesrgan"`. Emits `FutureWarning` on first use; API and defaults may change. |
 
 ---
@@ -414,9 +414,10 @@ warnings.filterwarnings("ignore", category=DeprecationWarning, module=r"pyt\..*"
 (`from pyt.legacy import YouTube`) so it's grep-able which call sites
 are still on the old surface.
 
-The legacy classes will be removed from the top-level `pyt` namespace
-in v2; `pyt.legacy.*` will outlive that release by one more cycle to
-keep migration windows reasonable.
+The legacy classes are removed from the top-level `pyt` namespace
+in v3; `pyt.legacy.*` will outlive that release by one more cycle to
+keep migration windows reasonable. Throughout 2.x they continue to
+work and only emit `DeprecationWarning`.
 
 ---
 
