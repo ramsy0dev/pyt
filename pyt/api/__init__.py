@@ -19,6 +19,9 @@ Async support is intentionally not in this v1. Adding it requires moving
 ``pyt.request`` to ``httpx`` and threading awaitables through the SABR
 session — that lands as a separate milestone.
 """
+# Bootstrap ~/.pyt/bin onto PATH before anything else does shutil.which().
+from pyt.api import _paths as _paths  # noqa: F401
+
 from pyt.api.errors import (
     PytError,
     VideoUnavailable,

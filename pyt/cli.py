@@ -927,6 +927,20 @@ def _parse_args(
     parser.add_argument("--logfile", metavar="FILE")
     parser.add_argument("--build-playback-report", action="store_true")
 
+    # Doctor: report on installed tools / available features, optionally
+    # download missing binaries to ~/.pyt/bin/.
+    parser.add_argument(
+        "--doctor",
+        action="store_true",
+        help="report on which tools/features are available",
+    )
+    parser.add_argument(
+        "--install",
+        metavar="TOOL",
+        help="install a tool to ~/.pyt/bin (use with --doctor). "
+             "Choices: ffmpeg, realesrgan, all",
+    )
+
     return parser.parse_args(args)
 
 
@@ -1154,6 +1168,54 @@ def _is_channel_url(url: str) -> bool:
     ) and "watch" not in parts and "playlist" not in parts
 
 
+def _run_doctor(args) -> int:
+    """Handle ``pyt --doctor [--install TOOL]``. Returns the exit code."""
+    from pyt.api import doctor as doc
+
+    if not args.install:
+        tools = doc.detect_all()
+        features = doc.feature_status(tools)
+        print(doc.render_status(tools, features))
+        return 0
+
+    targets = ["ffmpeg", "realesrgan"] if args.install == "all" else [args.install]
+    for tool in targets:
+        _print_section(f"Installing {tool}")
+        try:
+            plan = doc.plan_install(tool)
+        except doc.InstallError as exc:
+            _print_err(str(exc))
+            return 1
+
+        sys.stdout.write(f"  source: {plan.url}\n")
+        sys.stdout.write(f"  target: {plan.target_dir / plan.binary_name}\n")
+        sys.stdout.flush()
+
+        last_pct = [-1]
+
+        def on_progress(done: int, total) -> None:
+            if total:
+                pct = int(100 * done / total)
+                if pct != last_pct[0]:
+                    sys.stdout.write(f"\r  download: {pct}%  ({done / 1e6:.1f}/{total / 1e6:.1f} MB)")
+                    sys.stdout.flush()
+                    last_pct[0] = pct
+            else:
+                sys.stdout.write(f"\r  download: {done / 1e6:.1f} MB")
+                sys.stdout.flush()
+
+        try:
+            installed = doc.install(tool, on_progress=on_progress)
+        except doc.InstallError as exc:
+            sys.stdout.write("\n")
+            _print_err(f"install failed: {exc}")
+            return 1
+
+        sys.stdout.write("\n")
+        _print_ok(f"installed at  {DM}{installed}{R}")
+    return 0
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="pyt", add_help=False)
     parser.add_argument("-h", "--help", action="store_true")
@@ -1162,6 +1224,9 @@ def main() -> None:
     if getattr(args, "help", False):
         _print_help()
         sys.exit(0)
+
+    if getattr(args, "doctor", False):
+        sys.exit(_run_doctor(args))
 
     if args.verbose:
         setup_logger(logging.DEBUG, log_filename=args.logfile)

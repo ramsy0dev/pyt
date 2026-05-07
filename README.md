@@ -49,7 +49,54 @@ but cookies in particular are now load-bearing for the SABR workaround so
 they're part of the base install.
 
 ffmpeg is required for post-processing (audio conversion, metadata/thumbnail/subtitle
-embedding, SponsorBlock). Get it at https://ffmpeg.org/download.html.
+embedding, SponsorBlock). Get it at https://ffmpeg.org/download.html — or run
+`pyt --doctor --install ffmpeg` to drop it into `~/.pyt/bin/` automatically.
+
+### `pyt --doctor` — what's installed and what works
+
+```bash
+$ pyt --doctor
+pyt doctor - linux/x86_64, python 3.13
+Managed bin dir: /home/you/.pyt/bin
+
+Tools
+------------------------------------------------------------
+  [OK]   ffmpeg         ffmpeg version 7.1
+         path:    /usr/bin/ffmpeg
+         used by: muxing, audio extraction, post-processing, upscale re-encode
+  [OK]   ffprobe        ffprobe version 7.1
+         path:    /usr/bin/ffprobe
+         used by: duration / fps / audio detection (ships with ffmpeg)
+  [--]   realesrgan     not installed  (run: pyt --doctor --install realesrgan)
+         used by: Real-ESRGAN neural upscaler (optional, for pp.upscale algorithm='realesrgan')
+
+Features
+------------------------------------------------------------
+  [OK]   Stream download (SABR + byte-range)
+  [OK]   Audio extraction / format conversion
+  [OK]   Combined video+audio merge (CombinedDownload)
+  [OK]   Metadata / thumbnail / subtitle embedding
+  [OK]   SponsorBlock chapter marking
+  [OK]   Upscale (algorithm='lanczos')
+  [--]   Upscale (algorithm='realesrgan')  (needs: realesrgan)
+```
+
+Install missing binaries on the user's behalf — they go in
+`~/.pyt/bin/`, which pyt prepends to its own `PATH` at startup so it
+finds them without polluting your shell:
+
+```bash
+pyt --doctor --install ffmpeg       # Windows / Linux only (use Homebrew on macOS)
+pyt --doctor --install realesrgan   # all platforms
+pyt --doctor --install all
+```
+
+Sources:
+
+| Tool | Windows | Linux | macOS |
+|---|---|---|---|
+| ffmpeg | [gyan.dev essentials build](https://www.gyan.dev/ffmpeg/builds/) | [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds/releases) | use `brew install ffmpeg` |
+| realesrgan-ncnn-vulkan | [xinntao/Real-ESRGAN releases](https://github.com/xinntao/Real-ESRGAN/releases) | same | same |
 
 ---
 
@@ -375,6 +422,10 @@ Batch:
 Debug:
   -v, --verbose            Verbose logging
   --build-playback-report  Dump playback report to file
+
+Setup:
+  --doctor                 Report installed tools and available features
+  --doctor --install TOOL  Install a tool to ~/.pyt/bin (ffmpeg, realesrgan, all)
 ```
 
 ---
