@@ -144,6 +144,85 @@ session expiry), the missing tail is finished via byte-range request —
 a 99%-complete download won't die from one bad SABR exchange. Use
 `prefer_resolution=` to cap quality (e.g. `"1080p"` on a 4K source).
 
+### Upscaling (experimental)
+
+`pp.upscale(...)` runs the downloaded video through one of two
+upscalers — pick `algorithm=` based on what hardware you have.
+
+| | `algorithm="lanczos"` (default) | `algorithm="realesrgan"` |
+|---|---|---|
+| Method | ffmpeg's Lanczos resize + light unsharp pass | Real-ESRGAN neural network |
+| Adds detail? | No (cleaner interpolation) | Yes (model-hallucinated) |
+| Speed | Real-time on any CPU | 1–2 hours per minute of 720p without a GPU |
+| Disk use | Single ffmpeg pass | 20–30 GB temp for a 5-minute 720p clip |
+| Extra install | None (ffmpeg already required) | `realesrgan-ncnn-vulkan` binary on `PATH` |
+| Best at | 2× (360→720, 720→1440) | 4× when you have the hardware |
+
+**Lanczos — the default, works on any machine.** Single ffmpeg
+invocation: `scale=iw*N:ih*N:flags=lanczos` followed by a conservative
+`unsharp` pass to recover the edge sharpness Lanczos blurs. It doesn't
+add detail the source doesn't have, but it produces a noticeably
+cleaner result than naive bilinear or browser-side player upscaling,
+and it runs in real-time. **Use this for the typical 360→720 / 720→1440
+case.**
+
+```python
+from pyt import Client, pipeline as pp
+
+video = Client().video(url)
+path = (
+    video.download_best("downloads/", prefer_resolution="720p")
+        | pp.upscale(scale=2)
+).run()
+```
+
+**Real-ESRGAN — opt-in for users with GPUs.** Actual neural-net
+super-resolution that recovers detail (within reason). Heavy: install
+the `realesrgan-ncnn-vulkan` binary from
+[xinntao/Real-ESRGAN releases](https://github.com/xinntao/Real-ESRGAN/releases)
+and put it on `PATH` (~50 MB binary, replaces a 2 GB torch+basicsr
+install). The pipeline extracts every frame as PNG, upscales each one,
+then recombines with the original audio — that's where the 20–30 GB
+intermediate disk number comes from. Without a GPU it's effectively
+unusable on anything longer than a few minutes.
+
+```python
+path = (
+    video.download_best("downloads/", prefer_resolution="720p")
+        | pp.upscale(scale=4, algorithm="realesrgan")
+        | pp.embed_metadata()
+).run()
+```
+
+**Common arguments**
+
+| Argument | Default | Notes |
+|---|---|---|
+| `scale` | `2` | 2, 3, or 4 |
+| `algorithm` | `"lanczos"` | or `"realesrgan"` |
+
+**Lanczos-specific**
+
+| Argument | Default | Notes |
+|---|---|---|
+| `crf` | `18` | x264 CRF for the re-encode (lower = larger / higher quality; 18 is "visually lossless") |
+| `preset` | `"medium"` | x264 speed/efficiency preset; `"slow"` trades CPU for ~10% smaller output |
+| `sharpen` | `0.4` | unsharp amount, 0.0–1.5; `0` disables the sharpen pass |
+
+**Real-ESRGAN-specific**
+
+| Argument | Default | Notes |
+|---|---|---|
+| `model` | `"realesrgan-x4plus"` | also `realesrgan-x4plus-anime`, `realesr-animevideov3` |
+| `binary` | auto-detected on `PATH` | explicit path override |
+| `tile_size` | `0` (auto) | lower (e.g. 64, 128) if you hit GPU memory errors |
+| `keep_intermediate` | `False` | keep the extracted PNG frames for debugging |
+
+A `FutureWarning` is emitted on first use to make the experimental
+status loud. Filter it with
+`warnings.filterwarnings("ignore", category=FutureWarning, module=r"pyt\..*")`
+once you've read this section.
+
 ### Post-processing — declarative pipeline
 
 ```python

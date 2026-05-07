@@ -42,10 +42,12 @@ build-backend = "poetry.core.masonry.api"
 testpaths = ["tests"]
 filterwarnings = [
     # Legacy tests intentionally exercise the deprecated YouTube/Playlist/etc.
-    # surface. Silence those warnings here so the suite stays readable; the
-    # new-API tests in tests/test_api.py validate the modern path explicitly
-    # via pytest.warns, which works regardless of this filter.
+    # surface, and the upscale tests intentionally fire the experimental
+    # FutureWarning. Silence both here so the suite stays readable; tests
+    # that explicitly assert on these use pytest.warns / catch_warnings,
+    # which work regardless of this filter.
     "ignore::DeprecationWarning",
+    "ignore::FutureWarning",
 ]
 
 [tool.mypy]

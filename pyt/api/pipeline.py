@@ -136,6 +136,89 @@ def extract_audio(format: str = "mp3", *, quality: Optional[str] = None) -> Pipe
     return _ExtractAudio(name="extract_audio", format=format, quality=quality)
 
 
+def upscale(
+    *,
+    scale: int = 2,
+    algorithm: str = "lanczos",
+    # lanczos kwargs
+    crf: int = 18,
+    preset: str = "medium",
+    sharpen: float = 0.4,
+    # realesrgan kwargs
+    model: str = "realesrgan-x4plus",
+    binary: Optional[str] = None,
+    tile_size: int = 0,
+    keep_intermediate: bool = False,
+) -> PipelineStep:
+    """**Experimental.** Upscale the downloaded video.
+
+    Two algorithms are available:
+
+    ``algorithm="lanczos"`` (default)
+        Pure ffmpeg: a Lanczos resize plus a conservative unsharp pass.
+        Runs in real-time or faster on any CPU, no extra installs (ffmpeg
+        is already required). Best at 2× (360→720, 720→1440); doesn't add
+        detail the source doesn't have, but produces a noticeably cleaner
+        result than naive bilinear or browser-side player upscaling.
+        **This is the right choice for the typical user.**
+
+    ``algorithm="realesrgan"``
+        Neural-net super-resolution via the ``realesrgan-ncnn-vulkan``
+        binary (install from https://github.com/xinntao/Real-ESRGAN/releases).
+        Frames are extracted with ffmpeg, run through Real-ESRGAN, then
+        recombined with the original audio. **Heavy:** a 5-minute 720p
+        clip can use 20–30 GB of intermediate disk and 1–2 hours of CPU
+        without a GPU. Worth it for individual videos when you want
+        actual detail recovery and have the hardware.
+
+    Common arguments:
+
+    :param scale: 2, 3, or 4. Defaults to 2 (the lanczos sweet spot).
+    :param algorithm: ``"lanczos"`` or ``"realesrgan"``.
+
+    Lanczos-specific:
+
+    :param crf: x264 constant rate factor for the re-encode (lower = larger
+        & higher quality; 18 is "visually lossless" for most content).
+    :param preset: x264 speed/efficiency preset. ``"medium"`` is the
+        sensible default; ``"slow"`` trades CPU for ~10% smaller output.
+    :param sharpen: unsharp filter amount, 0.0–1.5. ``0`` disables the
+        sharpen pass. ``0.4`` is conservative; ``0.8`` is aggressive.
+
+    Real-ESRGAN-specific:
+
+    :param model: model name. Default ``realesrgan-x4plus``;
+        ``realesrgan-x4plus-anime`` and ``realesr-animevideov3`` are
+        better for cartoons / anime sources.
+    :param binary: explicit path to the ``realesrgan-ncnn-vulkan`` binary.
+        Defaults to ``shutil.which("realesrgan-ncnn-vulkan")``.
+    :param tile_size: per-tile pixel size, 0 = auto. Lower (32, 64, 128)
+        if you hit GPU memory errors.
+    :param keep_intermediate: leave the extracted PNG frames on disk for
+        debugging. Default deletes them.
+    """
+    from pyt.api.upscale import _Upscale, _VALID_ALGORITHMS
+
+    if algorithm not in _VALID_ALGORITHMS:
+        raise ValueError(
+            f"upscale algorithm must be one of {list(_VALID_ALGORITHMS)} "
+            f"(got {algorithm!r})"
+        )
+
+    return _Upscale(
+        name="upscale",
+        algorithm=algorithm,
+        scale=scale,
+        crf=crf,
+        preset=preset,
+        sharpen=sharpen,
+        model=model,
+        binary=binary,
+        tile_size=tile_size,
+        keep_intermediate=keep_intermediate,
+    )
+
+
 __all__ = [
     "PipelineStep",
     "sponsorblock",
@@ -143,4 +226,5 @@ __all__ = [
     "embed_thumbnail",
     "embed_subtitles",
     "extract_audio",
+    "upscale",
 ]
