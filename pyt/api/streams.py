@@ -6,10 +6,14 @@ mutation across call sites.
 """
 from __future__ import annotations
 
+import logging
 import re
 from typing import TYPE_CHECKING, Callable, Iterator, List, Optional, Sequence, Tuple
 
 from pyt.api.errors import NoMatchingStream
+
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from pyt.streams import Stream as _LegacyStream
@@ -316,6 +320,10 @@ class StreamSet(Sequence[StreamRef]):
         resolution. Raises :class:`NoMatchingStream` when the set is empty.
         """
         if not self._streams:
+            logger.debug(
+                "StreamSet.best: no candidates after filter chain "
+                "(video_id=%s)", self._video.video_id,
+            )
             raise NoMatchingStream(
                 "no streams matched the current filters",
                 video_id=self._video.video_id,
@@ -326,7 +334,14 @@ class StreamSet(Sequence[StreamRef]):
             br = _parse_threshold(s.abr) or (s.bitrate // 1000 if s.bitrate else 0)
             return (res, br)
 
-        return max(self._streams, key=_quality)
+        winner = max(self._streams, key=_quality)
+        logger.debug(
+            "StreamSet.best: picked itag=%d kind=%s res=%s abr=%s subtype=%s "
+            "(out of %d candidates) video_id=%s",
+            winner.itag, winner.kind, winner.resolution, winner.abr,
+            winner.subtype, len(self._streams), self._video.video_id,
+        )
+        return winner
 
     def one(self) -> StreamRef:
         """Return the sole matching stream — raise if 0 or >1 match.
@@ -392,6 +407,13 @@ class StreamSet(Sequence[StreamRef]):
                 _parse_threshold(s.abr) or (s.bitrate // 1000 if s.bitrate else 0),
                 s.bitrate or 0,
             ),
+        )
+        logger.info(
+            "StreamSet.best_pair: video itag=%d res=%s codec=%s + "
+            "audio itag=%d abr=%s codec=%s (prefer_resolution=%s, video_id=%s)",
+            video_stream.itag, video_stream.resolution, video_stream.video_codec,
+            audio_stream.itag, audio_stream.abr, audio_stream.audio_codec,
+            prefer_resolution, self._video.video_id,
         )
         return video_stream, audio_stream
 

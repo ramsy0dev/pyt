@@ -140,7 +140,8 @@ def test_parse_args_falsey():
     assert args.build_playback_report is False
     assert args.itag is None
     assert args.list is False
-    assert args.verbose is False
+    # `-v` is a count flag now: 0 = unset, 1 = -v / DEBUG, 2 = -vv / TRACE.
+    assert args.verbose == 0
 
 def test_parse_args_truthy():
     parser = argparse.ArgumentParser()
@@ -160,7 +161,9 @@ def test_parse_args_truthy():
     assert args.build_playback_report is True
     assert args.itag == 10
     assert args.list is True
-    assert args.verbose is True
+    # -vvv = 3 occurrences; we cap at TRACE (2+) for behavior, but the
+    # raw count is preserved for any caller that wants to inspect it.
+    assert args.verbose == 3
 
 @mock.patch("pyt.cli.setup_logger", return_value=None)
 def test_main_logging_setup(setup_logger):

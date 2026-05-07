@@ -923,7 +923,12 @@ def _parse_args(
     parser.add_argument("--max-sleep-interval", metavar="N", type=float)
     parser.add_argument("--batch-file", metavar="FILE")
     parser.add_argument("--download-archive", metavar="FILE")
-    parser.add_argument("-v", "--verbose", action="store_true")
+    # `-v` enables DEBUG-level logging; `-vv` adds TRACE (per-chunk /
+    # per-HTTP-call detail, very loud).
+    parser.add_argument(
+        "-v", "--verbose", action="count", default=0,
+        help="increase log verbosity. -v=DEBUG, -vv=TRACE",
+    )
     parser.add_argument("--logfile", metavar="FILE")
     parser.add_argument("--build-playback-report", action="store_true")
 
@@ -1229,8 +1234,17 @@ def main() -> None:
         sys.exit(_run_doctor(args))
 
     if args.verbose:
-        setup_logger(logging.DEBUG, log_filename=args.logfile)
-        logger.debug("pyt %s", __version__)
+        # `-v` -> DEBUG (most actions, tool decisions, timings)
+        # `-vv` -> TRACE (per-chunk SABR, per-HTTP-call, very loud)
+        from pyt.api._logging import TRACE
+        level = TRACE if args.verbose >= 2 else logging.DEBUG
+        setup_logger(level, log_filename=args.logfile)
+        # Modern API uses the public log-control API; route the same
+        # CLI verbosity through it so consumers of pyt.api see the
+        # same level the legacy paths see.
+        from pyt.api._logging import enable_logging
+        enable_logging(level=level, file=args.logfile)
+        logger.debug("pyt %s (verbosity=%d)", __version__, args.verbose)
 
     # Merge config file values (CLI flags take precedence)
     apply_config(args, load_config())

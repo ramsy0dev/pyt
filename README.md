@@ -333,6 +333,31 @@ path = (
 Steps run in order. Failures raise `PostProcessError` with `step=` and
 `partial_output_path=` set, so you can recover or report cleanly.
 
+### Logging & diagnostics
+
+pyt is silent by default. Turn it on when you need it:
+
+```python
+import pyt
+
+pyt.enable_logging("DEBUG")              # filter chains, picks, timings, retries
+pyt.enable_logging("TRACE")              # everything, incl. per-chunk SABR
+pyt.enable_logging(file="/tmp/pyt.log")  # also write to file (good for bug reports)
+pyt.set_log_level("INFO")                # adjust mid-run
+pyt.disable_logging()
+```
+
+Or set `PYT_LOG_LEVEL=DEBUG` in your environment to enable logging
+without touching the code that uses pyt.
+
+For bug reports, `pyt.diagnostic_report()` returns a self-contained
+text block with version / platform / installed-tool state — paste it
+into a GitHub issue. It does **not** include URLs, video IDs, or any
+user content.
+
+See [docs/features/logging.md](docs/features/logging.md) for the full
+reference (levels, formats, integration with your own logging setup).
+
 ### Errors
 
 Every modern API failure inherits from `pyt.PytError`:
@@ -434,7 +459,8 @@ Batch:
   --max-sleep-interval N   Random sleep between N and max-N seconds
 
 Debug:
-  -v, --verbose            Verbose logging
+  -v, --verbose            Increase log verbosity (-v=DEBUG, -vv=TRACE)
+  --logfile FILE           Also write logs to a file (great for bug reports)
   --build-playback-report  Dump playback report to file
 
 Setup:

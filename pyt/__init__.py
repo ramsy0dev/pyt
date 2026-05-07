@@ -48,4 +48,11 @@ from pyt.api import (
     DownloadError,
     PostProcessError,
     ConfigError,
+    enable_logging,
+    disable_logging,
+    set_log_level,
+    get_log_level,
+    logging_enabled,
+    diagnostic_report,
+    TRACE,
 )

@@ -132,9 +132,19 @@ class CombinedDownload:
     def run(self) -> Path:
         """Drive one SABR session for both formats, merge with ffmpeg,
         run any pipeline steps, return the final :class:`Path`."""
+        import time as _time
+        t_start = _time.monotonic()
         target_dir = Path(target_directory(self._output_path))
         container = self._container or pick_merge_container_for_streams(
             self._video_stream, self._audio_stream
+        )
+        logger.info(
+            "CombinedDownload.run: video itag=%d (%s) + audio itag=%d (%s) "
+            "container=%s output=%s steps=%d (video_id=%s)",
+            self._video_stream.itag, self._video_stream.video_codec,
+            self._audio_stream.itag, self._audio_stream.audio_codec,
+            container, target_dir, len(self._steps),
+            self._video.video_id,
         )
 
         if self._filename:
@@ -238,8 +248,17 @@ class CombinedDownload:
         if not sabr_url:
             # Pre-SABR account/video — nothing to multiplex. Fall through to
             # the byte-range path which the fallback method already handles.
-            logger.info("no SABR URL available; using byte-range for both formats")
+            logger.info(
+                "CombinedDownload: no SABR URL for video_id=%s; "
+                "falling back to byte-range for both formats",
+                self._video.video_id,
+            )
             return
+
+        logger.debug(
+            "CombinedDownload: opening SABR session url=%s formats=[(%d,video),(%d,audio)]",
+            sabr_url, self._video_stream.itag, self._audio_stream.itag,
+        )
 
         with warnings.catch_warnings():
             # SabrSession indirectly imports legacy paths; suppress noise.
@@ -277,6 +296,10 @@ class CombinedDownload:
         for p in parts:
             remaining = p.remaining()
             if remaining <= 0:
+                logger.debug(
+                    "CombinedDownload: itag=%d delivered fully via SABR (%d bytes)",
+                    p.itag, p.written,
+                )
                 continue
             if not p.direct_url:
                 raise DownloadError(

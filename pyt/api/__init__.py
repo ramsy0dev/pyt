@@ -22,6 +22,17 @@ session — that lands as a separate milestone.
 # Bootstrap ~/.pyt/bin onto PATH before anything else does shutil.which().
 from pyt.api import _paths as _paths  # noqa: F401
 
+# Public log-control API — silent until enable_logging() is called.
+from pyt.api._logging import (  # noqa: F401
+    enable_logging,
+    disable_logging,
+    set_log_level,
+    get_log_level,
+    is_enabled as logging_enabled,
+    diagnostic_report,
+    TRACE,
+)
+
 from pyt.api.errors import (
     PytError,
     VideoUnavailable,
@@ -64,4 +75,12 @@ __all__ = [
     "DownloadError",
     "PostProcessError",
     "ConfigError",
+    # Logging
+    "enable_logging",
+    "disable_logging",
+    "set_log_level",
+    "get_log_level",
+    "logging_enabled",
+    "diagnostic_report",
+    "TRACE",
 ]

@@ -9,10 +9,15 @@ internally — fully decoupling from it is a v2 task.
 from __future__ import annotations
 
 import http.cookiejar
+import logging
+import time
 from typing import Any, Callable, Dict, Optional
 
 from pyt.api.errors import ConfigError
 from pyt.api.video import Video
+
+
+logger = logging.getLogger(__name__)
 
 
 _BROWSER_CHOICES = {"chrome", "chromium", "firefox", "brave", "edge", "safari", "opera"}
@@ -64,15 +69,27 @@ class Client:
 
         self._cookies_installed = False
 
+        logger.debug(
+            "Client init: proxy=%s cookies=%s cookies_from_browser=%s "
+            "po_token=%s oauth=%s on_progress=%s on_complete=%s",
+            bool(proxy), bool(cookies), cookies_from_browser,
+            "set" if po_token else "unset",
+            use_oauth,
+            "set" if on_progress else "unset",
+            "set" if on_complete else "unset",
+        )
+
     # ── public ──────────────────────────────────────────────────────────────
 
     def video(self, url: str) -> Video:
         """Fetch a single video by URL or ID. This is the network boundary —
         all attribute access on the returned :class:`Video` is pure.
         """
+        logger.info("client.video: fetching %s", url)
+        t0 = time.monotonic()
         self._ensure_cookies_installed()
         proxies = self._proxies_dict()
-        return Video._from_url(
+        result = Video._from_url(
             url,
             po_token=self._po_token,
             use_oauth=self._use_oauth,
@@ -81,6 +98,20 @@ class Client:
             on_progress=self._on_progress,
             on_complete=self._on_complete,
         )
+        # Log post-hydration timing. Wrap the attribute access so test
+        # mocks of _from_url that return a sentinel don't blow up — we
+        # don't want our own logging to make the API less mockable.
+        try:
+            video_id = getattr(result, "video_id", "?")
+            title = (getattr(result, "title", "") or "")[:60]
+            length = getattr(result, "length", "?")
+            logger.info(
+                "client.video: %s hydrated in %.2fs (title=%r length=%s)",
+                video_id, time.monotonic() - t0, title, length,
+            )
+        except Exception:  # noqa: BLE001 — logging must never raise
+            pass
+        return result
 
     def playlist(self, url: str):
         """Open a YouTube playlist."""
@@ -125,12 +156,20 @@ class Client:
         from pyt import cookies as cookie_loader
 
         if self._cookies_path:
+            logger.debug("loading cookies from file %s", self._cookies_path)
             jar = cookie_loader.load_cookies_from_file(self._cookies_path)
         else:
+            logger.debug("loading cookies from browser %s", self._cookies_browser)
             jar = cookie_loader.load_cookies_from_browser(self._cookies_browser)
 
         if not isinstance(jar, http.cookiejar.CookieJar):
             raise ConfigError("cookie loader did not return a CookieJar")
 
+        cookie_count = sum(1 for _ in jar)
+        logger.info(
+            "installed %d cookies from %s",
+            cookie_count,
+            "file" if self._cookies_path else f"browser {self._cookies_browser}",
+        )
         cookie_loader.install_cookies(jar)
         self._cookies_installed = True

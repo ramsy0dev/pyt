@@ -1,12 +1,16 @@
 """The :class:`Video` — a thin, typed facade over :class:`pyt.YouTube`."""
 from __future__ import annotations
 
+import logging
 import warnings
 from datetime import datetime, timedelta
 from typing import Any, Callable, Dict, List, Optional
 
 import pyt.exceptions as legacy_exc
 from pyt.__main__ import YouTube as _LegacyYouTube
+
+
+logger = logging.getLogger(__name__)
 from pyt.api.errors import (
     AgeRestricted,
     LiveStreamNotSupported,
@@ -82,12 +86,19 @@ class Video:
                     po_token=po_token,
                 )
         except legacy_exc.PytError as exc:
+            logger.warning("Video._from_url: legacy YouTube ctor failed for %s: %s", url, exc)
             translated = _translate(exc, video_id=None, url=url)
             raise translated if translated is not None else exc
+
+        logger.debug("Video._from_url: legacy YouTube ctor OK, video_id=%s", yt.video_id)
 
         try:
             meta = _hydrate_meta(yt, url=url)
         except legacy_exc.PytError as exc:
+            logger.warning(
+                "Video._from_url: hydrate_meta failed for %s: %s",
+                getattr(yt, "video_id", "?"), exc,
+            )
             translated = _translate(exc, video_id=getattr(yt, "video_id", None), url=url)
             raise translated if translated is not None else exc
 
@@ -143,12 +154,20 @@ class Video:
     def streams(self) -> StreamSet:
         """The video's stream catalog. Lazily fetched once, then cached."""
         if self._streams is None:
+            logger.debug("video.streams: hydrating stream catalog for %s", self.video_id)
             try:
                 fmt_streams = self._legacy.fmt_streams
             except legacy_exc.PytError as exc:
+                logger.warning(
+                    "video.streams: fmt_streams failed for %s: %s", self.video_id, exc,
+                )
                 translated = _translate(exc, video_id=self.video_id, url=self.url)
                 raise translated if translated is not None else exc
             self._streams = StreamSet._from_legacy(fmt_streams, video=self)
+            logger.info(
+                "video.streams: %s catalog has %d streams",
+                self.video_id, len(self._streams),
+            )
         return self._streams
 
     # ── combined download ──────────────────────────────────────────────────
