@@ -287,7 +287,7 @@ def test_realesrgan_full_pipeline(tmp_path):
         target_dir.mkdir(exist_ok=True)
         (target_dir / "frame_00000001.png").write_bytes(b"PNG")
 
-    def fake_upscale(binary, src_dir, target_dir, *, model, scale, tile_size):
+    def fake_upscale(binary, src_dir, target_dir, *, model, scale, tile_size, threads=None):
         upscale_call.update(model=model, scale=scale, tile_size=tile_size)
         target_dir.mkdir(exist_ok=True)
         (target_dir / "frame_00000001.png").write_bytes(b"PNG-up")
@@ -392,6 +392,271 @@ def test_realesrgan_subprocess_failure_restores_source(tmp_path):
     assert "exit 1" in str(exc_info.value)
     assert "VRAM allocation failed" in str(exc_info.value)
     assert src.read_bytes() == b"original"
+
+
+def test_realesrgan_threads_kwarg_passes_to_binary(tmp_path):
+    """The -j flag should be on the realesrgan command line iff threads is set."""
+    src = tmp_path / "v.mp4"
+    src.write_bytes(b"x")
+
+    captured = {}
+
+    def fake_upscale(binary, src_dir, target_dir, *, model, scale, tile_size, threads=None):
+        captured["threads"] = threads
+        target_dir.mkdir(exist_ok=True)
+        (target_dir / "frame_00000001.png").write_bytes(b"P")
+
+    def fake_recombine(ffmpeg, *, frames_dir, audio_source, output, fps):
+        output.write_bytes(b"y")
+
+    with mock.patch("pyt.api.upscale.shutil.which",
+                    side_effect=_which_factory("realesrgan-ncnn-vulkan", "ffmpeg")), \
+         mock.patch("pyt.api.upscale._extract_frames"), \
+         mock.patch("pyt.api.upscale._upscale_frames_realesrgan", side_effect=fake_upscale), \
+         mock.patch("pyt.api.upscale._recombine", side_effect=fake_recombine), \
+         mock.patch("pyt.api.upscale._probe_fps", return_value=30.0), \
+         mock.patch("pyt.api.upscale._probe_has_audio", return_value=False):
+        _run_realesrgan(
+            input_path=src, scale=4, model="realesrgan-x4plus",
+            binary_override=None, tile_size=0, keep_intermediate=False,
+            chunk_seconds=0, threads="1:4:1",
+        )
+
+    assert captured["threads"] == "1:4:1"
+
+
+# ── chunked path ──────────────────────────────────────────────────────────
+
+
+def test_realesrgan_chunked_default_processes_in_chunks(tmp_path):
+    """Default chunk_seconds=30 + a probeable duration should drive the
+    chunked path: per-chunk extract+upscale+encode, then concat+mux."""
+    src = tmp_path / "video.mp4"
+    src.write_bytes(b"original")
+
+    extract_calls = []
+    encode_calls = []
+    concat_calls = []
+    mux_calls = []
+
+    def fake_extract_segment(ffmpeg, source, target_dir, *, start, duration):
+        extract_calls.append((start, duration))
+        target_dir.mkdir(parents=True, exist_ok=True)
+        (target_dir / "frame_00000001.png").write_bytes(b"P")
+
+    def fake_upscale(binary, src_dir, target_dir, *, model, scale, tile_size, threads=None):
+        target_dir.mkdir(parents=True, exist_ok=True)
+        (target_dir / "frame_00000001.png").write_bytes(b"PP")
+
+    def fake_encode(ffmpeg, frames_dir, output, *, fps):
+        encode_calls.append((Path(frames_dir).name, output))
+        output.write_bytes(b"chunk")
+
+    def fake_concat(ffmpeg, chunks, output):
+        concat_calls.append([str(c) for c in chunks])
+        output.write_bytes(b"concat")
+
+    def fake_mux(ffmpeg, *, video, audio_source, output):
+        mux_calls.append((video, audio_source))
+        output.write_bytes(b"final")
+
+    with mock.patch("pyt.api.upscale.shutil.which",
+                    side_effect=_which_factory("realesrgan-ncnn-vulkan", "ffmpeg")), \
+         mock.patch("pyt.api.upscale._extract_frames_segment", side_effect=fake_extract_segment), \
+         mock.patch("pyt.api.upscale._upscale_frames_realesrgan", side_effect=fake_upscale), \
+         mock.patch("pyt.api.upscale._encode_chunk_video", side_effect=fake_encode), \
+         mock.patch("pyt.api.upscale._concat_videos", side_effect=fake_concat), \
+         mock.patch("pyt.api.upscale._mux_audio", side_effect=fake_mux), \
+         mock.patch("pyt.api.upscale._probe_fps", return_value=30.0), \
+         mock.patch("pyt.api.upscale._probe_has_audio", return_value=True), \
+         mock.patch("pyt.api.upscale._probe_duration", return_value=75.0):
+        _run_realesrgan(
+            input_path=src, scale=4, model="realesrgan-x4plus",
+            binary_override=None, tile_size=0, keep_intermediate=False,
+            chunk_seconds=30, threads=None,
+        )
+
+    # 75 seconds at 30s per chunk = 3 chunks: [0,30), [30,60), [60,75).
+    assert len(extract_calls) == 3
+    assert extract_calls[0] == (0, 30.0)
+    assert extract_calls[1] == (30, 30.0)
+    # Last chunk's duration is the remainder, not 30s.
+    assert extract_calls[2] == (60, 15.0)
+
+    # Three chunks were encoded individually then concatenated.
+    assert len(encode_calls) == 3
+    assert len(concat_calls) == 1
+    assert len(concat_calls[0]) == 3
+
+    # Audio was muxed back at the end (not into individual chunks).
+    assert len(mux_calls) == 1
+    assert mux_calls[0][1] == src        # audio source = original
+
+    # Final output replaced the source.
+    assert src.read_bytes() == b"final"
+
+
+def test_realesrgan_chunked_no_audio_skips_mux(tmp_path):
+    src = tmp_path / "video.mp4"
+    src.write_bytes(b"x")
+
+    def fake_extract_segment(ffmpeg, source, target_dir, *, start, duration):
+        target_dir.mkdir(parents=True, exist_ok=True)
+        (target_dir / "frame_00000001.png").write_bytes(b"P")
+
+    def fake_upscale(binary, src_dir, target_dir, *, model, scale, tile_size, threads=None):
+        target_dir.mkdir(parents=True, exist_ok=True)
+        (target_dir / "frame_00000001.png").write_bytes(b"PP")
+
+    def fake_encode(ffmpeg, frames_dir, output, *, fps):
+        output.write_bytes(b"chunk")
+
+    def fake_concat(ffmpeg, chunks, output):
+        output.write_bytes(b"final")
+
+    mux_called = mock.MagicMock()
+
+    with mock.patch("pyt.api.upscale.shutil.which",
+                    side_effect=_which_factory("realesrgan-ncnn-vulkan", "ffmpeg")), \
+         mock.patch("pyt.api.upscale._extract_frames_segment", side_effect=fake_extract_segment), \
+         mock.patch("pyt.api.upscale._upscale_frames_realesrgan", side_effect=fake_upscale), \
+         mock.patch("pyt.api.upscale._encode_chunk_video", side_effect=fake_encode), \
+         mock.patch("pyt.api.upscale._concat_videos", side_effect=fake_concat), \
+         mock.patch("pyt.api.upscale._mux_audio", side_effect=mux_called), \
+         mock.patch("pyt.api.upscale._probe_fps", return_value=30.0), \
+         mock.patch("pyt.api.upscale._probe_has_audio", return_value=False), \
+         mock.patch("pyt.api.upscale._probe_duration", return_value=45.0):
+        _run_realesrgan(
+            input_path=src, scale=4, model="realesrgan-x4plus",
+            binary_override=None, tile_size=0, keep_intermediate=False,
+            chunk_seconds=30, threads=None,
+        )
+
+    mux_called.assert_not_called()
+    assert src.read_bytes() == b"final"
+
+
+def test_realesrgan_chunked_falls_back_when_duration_unprobeable(tmp_path):
+    """If ffprobe can't tell us the duration we can't compute chunk
+    boundaries — fall back to the single-shot path rather than guessing.
+    """
+    src = tmp_path / "video.mp4"
+    src.write_bytes(b"x")
+
+    single_shot = mock.MagicMock()
+    chunked = mock.MagicMock()
+
+    with mock.patch("pyt.api.upscale.shutil.which",
+                    side_effect=_which_factory("realesrgan-ncnn-vulkan", "ffmpeg")), \
+         mock.patch("pyt.api.upscale._realesrgan_single_shot", side_effect=single_shot), \
+         mock.patch("pyt.api.upscale._realesrgan_chunked", wraps=upscale_mod._realesrgan_chunked), \
+         mock.patch("pyt.api.upscale._probe_fps", return_value=30.0), \
+         mock.patch("pyt.api.upscale._probe_has_audio", return_value=False), \
+         mock.patch("pyt.api.upscale._probe_duration", return_value=None), \
+         mock.patch("pyt.api.upscale.os.replace"):
+        _run_realesrgan(
+            input_path=src, scale=4, model="realesrgan-x4plus",
+            binary_override=None, tile_size=0, keep_intermediate=False,
+            chunk_seconds=30, threads=None,
+        )
+
+    single_shot.assert_called_once()
+
+
+def test_realesrgan_chunk_seconds_zero_uses_single_shot(tmp_path):
+    src = tmp_path / "video.mp4"
+    src.write_bytes(b"x")
+
+    single_shot = mock.MagicMock()
+    chunked = mock.MagicMock()
+
+    with mock.patch("pyt.api.upscale.shutil.which",
+                    side_effect=_which_factory("realesrgan-ncnn-vulkan", "ffmpeg")), \
+         mock.patch("pyt.api.upscale._realesrgan_single_shot", side_effect=single_shot), \
+         mock.patch("pyt.api.upscale._realesrgan_chunked", side_effect=chunked), \
+         mock.patch("pyt.api.upscale.os.replace"):
+        _run_realesrgan(
+            input_path=src, scale=4, model="realesrgan-x4plus",
+            binary_override=None, tile_size=0, keep_intermediate=False,
+            chunk_seconds=0, threads=None,
+        )
+
+    single_shot.assert_called_once()
+    chunked.assert_not_called()
+
+
+def test_realesrgan_chunked_uses_fast_seek(tmp_path):
+    """`-ss` placed before `-i` is the fast-seek form; verify the cmd shape."""
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        return mock.Mock(returncode=0)
+
+    with mock.patch("pyt.api.upscale.subprocess.run", side_effect=fake_run):
+        upscale_mod._extract_frames_segment(
+            "/usr/bin/ffmpeg", tmp_path / "in.mp4", tmp_path / "out",
+            start=42.5, duration=10.0,
+        )
+
+    cmd = captured["cmd"]
+    # `-ss` MUST appear before `-i` (fast seek), and `-t` after `-i`.
+    ss_idx = cmd.index("-ss")
+    i_idx = cmd.index("-i")
+    t_idx = cmd.index("-t")
+    assert ss_idx < i_idx < t_idx
+    assert cmd[ss_idx + 1] == "42.500"
+    assert cmd[t_idx + 1] == "10.000"
+    # Audio is dropped during chunk extraction; we mux the original back at the end.
+    assert "-an" in cmd
+
+
+def test_concat_videos_writes_concat_list(tmp_path):
+    chunks = [tmp_path / "chunk_0.mp4", tmp_path / "chunk_1.mp4"]
+    for c in chunks:
+        c.write_bytes(b"x")
+    output = tmp_path / "out.mp4"
+
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        return mock.Mock(returncode=0)
+
+    with mock.patch("pyt.api.upscale.subprocess.run", side_effect=fake_run):
+        upscale_mod._concat_videos("/usr/bin/ffmpeg", chunks, output)
+
+    list_file = output.parent / "concat_list.txt"
+    assert list_file.exists()
+    content = list_file.read_text()
+    assert "chunk_0.mp4" in content
+    assert "chunk_1.mp4" in content
+    # `-c copy` so the concat is bit-for-bit, no re-encode.
+    assert "-c" in captured["cmd"]
+    assert captured["cmd"][captured["cmd"].index("-c") + 1] == "copy"
+
+
+# ── ffprobe duration ────────────────────────────────────────────────────
+
+
+def test_probe_duration_parses_seconds(tmp_path):
+    with mock.patch("pyt.api.upscale.shutil.which", return_value="/usr/bin/ffprobe"), \
+         mock.patch(
+             "pyt.api.upscale.subprocess.run",
+             return_value=mock.Mock(stdout=b"75.123456\n"),
+         ):
+        from pyt.api.upscale import _probe_duration
+        assert _probe_duration(tmp_path / "v.mp4") == pytest.approx(75.12, rel=1e-3)
+
+
+def test_probe_duration_returns_none_on_garbage(tmp_path):
+    with mock.patch("pyt.api.upscale.shutil.which", return_value="/usr/bin/ffprobe"), \
+         mock.patch(
+             "pyt.api.upscale.subprocess.run",
+             return_value=mock.Mock(stdout=b""),
+         ):
+        from pyt.api.upscale import _probe_duration
+        assert _probe_duration(tmp_path / "v.mp4") is None
 
 
 def test_realesrgan_unknown_model_warns_but_proceeds(tmp_path, caplog):

@@ -153,8 +153,8 @@ upscalers — pick `algorithm=` based on what hardware you have.
 |---|---|---|
 | Method | ffmpeg's Lanczos resize + light unsharp pass | Real-ESRGAN neural network |
 | Adds detail? | No (cleaner interpolation) | Yes (model-hallucinated) |
-| Speed | Real-time on any CPU | 1–2 hours per minute of 720p without a GPU |
-| Disk use | Single ffmpeg pass | 20–30 GB temp for a 5-minute 720p clip |
+| Speed | Real-time on any CPU | GPU-bound; ~1 hour per minute of 720p without a GPU |
+| Peak disk (5-min 720p) | A few hundred MB (single ffmpeg pass) | ~6 GB chunked (default), ~45 GB unchunked |
 | Extra install | None (ffmpeg already required) | `realesrgan-ncnn-vulkan` binary on `PATH` |
 | Best at | 2× (360→720, 720→1440) | 4× when you have the hardware |
 
@@ -177,22 +177,48 @@ path = (
 ```
 
 **Real-ESRGAN — opt-in for users with GPUs.** Actual neural-net
-super-resolution that recovers detail (within reason). Heavy: install
-the `realesrgan-ncnn-vulkan` binary from
+super-resolution that recovers detail (within reason). Install the
+`realesrgan-ncnn-vulkan` binary from
 [xinntao/Real-ESRGAN releases](https://github.com/xinntao/Real-ESRGAN/releases)
 and put it on `PATH` (~50 MB binary, replaces a 2 GB torch+basicsr
-install). The pipeline extracts every frame as PNG, upscales each one,
-then recombines with the original audio — that's where the 20–30 GB
-intermediate disk number comes from. Without a GPU it's effectively
-unusable on anything longer than a few minutes.
+install).
+
+The pipeline processes the video in **N-second chunks** (default 30s)
+so peak disk usage is bounded by chunk size, not video length:
+
+1. Extract one chunk's frames as PNG
+2. Upscale them with Real-ESRGAN
+3. Re-encode that chunk to a small mp4
+4. Drop both PNG dirs
+5. (After all chunks) ffmpeg concat (no re-encode) + remux original audio
+
+Concrete numbers for a 5-minute 720p × 4× upscale:
+
+| | Default chunked (30s) | Unchunked (`chunk_seconds=0`) |
+|---|---|---|
+| Peak intermediate disk | **~6 GB** | ~45 GB |
+| Wall-clock | GPU-bound — ~same as unchunked | GPU-bound |
+| Final output size | identical | identical |
 
 ```python
 path = (
     video.download_best("downloads/", prefer_resolution="720p")
-        | pp.upscale(scale=4, algorithm="realesrgan")
+        | pp.upscale(scale=4, algorithm="realesrgan")     # default chunk_seconds=30
         | pp.embed_metadata()
 ).run()
+
+# Tighter disk budget? Smaller chunks.
+| pp.upscale(scale=4, algorithm="realesrgan", chunk_seconds=10)
+
+# Beefy GPU sitting idle? Push more parallel inference batches.
+| pp.upscale(scale=4, algorithm="realesrgan", threads="1:4:1")
 ```
+
+Wall-clock is dominated by per-frame inference, which is GPU-bound;
+chunking doesn't speed that up, it just keeps you from running out of
+disk. Without a GPU, Real-ESRGAN is effectively unusable on anything
+longer than a few minutes regardless of chunk size — use lanczos
+instead.
 
 **Common arguments**
 
@@ -216,6 +242,8 @@ path = (
 | `model` | `"realesrgan-x4plus"` | also `realesrgan-x4plus-anime`, `realesr-animevideov3` |
 | `binary` | auto-detected on `PATH` | explicit path override |
 | `tile_size` | `0` (auto) | lower (e.g. 64, 128) if you hit GPU memory errors |
+| `chunk_seconds` | `30` | size of each processing window in seconds; `0` disables chunking |
+| `threads` | `None` (binary picks) | passes through to `realesrgan-ncnn-vulkan -j load:proc:save` |
 | `keep_intermediate` | `False` | keep the extracted PNG frames for debugging |
 
 A `FutureWarning` is emitted on first use to make the experimental

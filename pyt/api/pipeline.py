@@ -149,6 +149,8 @@ def upscale(
     binary: Optional[str] = None,
     tile_size: int = 0,
     keep_intermediate: bool = False,
+    chunk_seconds: int = 30,
+    threads: Optional[str] = None,
 ) -> PipelineStep:
     """**Experimental.** Upscale the downloaded video.
 
@@ -165,11 +167,13 @@ def upscale(
     ``algorithm="realesrgan"``
         Neural-net super-resolution via the ``realesrgan-ncnn-vulkan``
         binary (install from https://github.com/xinntao/Real-ESRGAN/releases).
-        Frames are extracted with ffmpeg, run through Real-ESRGAN, then
-        recombined with the original audio. **Heavy:** a 5-minute 720p
-        clip can use 20–30 GB of intermediate disk and 1–2 hours of CPU
-        without a GPU. Worth it for individual videos when you want
-        actual detail recovery and have the hardware.
+        The video is processed in N-second chunks (default 30s) so peak
+        disk usage is bounded by chunk size, not video length — a
+        5-minute 720p clip peaks at ~6 GB instead of ~45 GB. Each chunk:
+        extract frames → upscale → re-encode to a small mp4 → drop the
+        PNGs. Final step: concat (no re-encode) + remux original audio.
+        Wall-clock is still GPU-bound; tune ``threads=`` if you have
+        spare GPU memory.
 
     Common arguments:
 
@@ -196,6 +200,16 @@ def upscale(
         if you hit GPU memory errors.
     :param keep_intermediate: leave the extracted PNG frames on disk for
         debugging. Default deletes them.
+    :param chunk_seconds: process the video in N-second segments to bound
+        peak disk usage. ``30`` (default) is a good fit for most clips;
+        smaller (``10``) if disk is really tight, larger (``60``) if you
+        have plenty. ``0`` disables chunking and processes the whole
+        video in one shot — only sensible on very short clips with
+        plenty of disk.
+    :param threads: passed verbatim to ``realesrgan-ncnn-vulkan -j`` as
+        ``load:proc:save`` thread counts. Default ``None`` lets the
+        binary pick (``1:2:2``). Try ``"1:4:1"`` or ``"1:8:2"`` if you
+        have headroom on a beefy GPU.
     """
     from pyt.api.upscale import _Upscale, _VALID_ALGORITHMS
 
@@ -216,6 +230,8 @@ def upscale(
         binary=binary,
         tile_size=tile_size,
         keep_intermediate=keep_intermediate,
+        chunk_seconds=chunk_seconds,
+        threads=threads,
     )
 
 
