@@ -39,10 +39,21 @@ not a check that fails on missing tools.
 ## Auto-install
 
 ```bash
-pyt --doctor --install ffmpeg       # Windows / Linux only
-pyt --doctor --install realesrgan   # Windows / Linux / macOS
+pyt --doctor --install ffmpeg                # Windows / Linux only
+pyt --doctor --install realesrgan            # Windows / Linux / macOS
+pyt --doctor --install po-token-generator    # needs Node 18+ on PATH
 pyt --doctor --install all
 ```
+
+The **po-token-generator** install is npm-based, not archive-based:
+it writes `package.json` to `~/.pyt/js/`, runs `npm install bgutils-js
+youtubei.js`, copies pyt's vendored launcher (`po_token_launcher.js`)
+into the same directory, and drops a wrapper at
+`~/.pyt/bin/pyt-po-token` that runs the launcher with the right
+`NODE_PATH`. After that, `--po-token-cmd "pyt-po-token"` gets you a
+fresh token; the modern `Client` auto-refreshes on
+`ATTESTATION_REQUIRED`. See [po-token.md](po-token.md) for the full
+flow.
 
 Each install:
 

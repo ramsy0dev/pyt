@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import io
 import os
+import subprocess
 import zipfile
 from pathlib import Path
 from unittest import mock
@@ -323,6 +324,179 @@ def test_install_raises_when_verify_fails(tmp_path, monkeypatch):
             doctor.install("realesrgan")
     # Rollback: the binary should NOT be left behind.
     assert not (fake_pyt_bin / binary_name).exists()
+
+
+# ── po-token-generator install ─────────────────────────────────────────────
+
+
+def test_install_po_token_generator_requires_node(tmp_path, monkeypatch):
+    """`pyt --doctor --install po-token-generator` errors clearly when
+    Node isn't on PATH — we don't auto-install runtimes."""
+    monkeypatch.setattr(doctor, "pyt_data_dir", lambda: tmp_path / ".pyt")
+    monkeypatch.setattr(doctor, "pyt_bin_dir", lambda: tmp_path / ".pyt" / "bin")
+
+    with mock.patch("pyt.api.doctor.shutil.which", return_value=None):
+        with pytest.raises(doctor.InstallError, match="Node.js"):
+            doctor._install_po_token_generator()
+
+
+def test_install_po_token_generator_requires_npm(tmp_path, monkeypatch):
+    monkeypatch.setattr(doctor, "pyt_data_dir", lambda: tmp_path / ".pyt")
+    monkeypatch.setattr(doctor, "pyt_bin_dir", lambda: tmp_path / ".pyt" / "bin")
+
+    def _which(name):
+        return "/usr/bin/node" if name == "node" else None
+
+    with mock.patch("pyt.api.doctor.shutil.which", side_effect=_which):
+        with pytest.raises(doctor.InstallError, match="npm"):
+            doctor._install_po_token_generator()
+
+
+def test_install_po_token_generator_rejects_old_node(tmp_path, monkeypatch):
+    """Node 16 lacks global fetch — refuse to install on it."""
+    monkeypatch.setattr(doctor, "pyt_data_dir", lambda: tmp_path / ".pyt")
+    monkeypatch.setattr(doctor, "pyt_bin_dir", lambda: tmp_path / ".pyt" / "bin")
+
+    def _which(name):
+        return f"/usr/bin/{name}" if name in ("node", "npm") else None
+
+    def _run(cmd, **kwargs):
+        if cmd[0] == "/usr/bin/node" and "--version" in cmd:
+            return mock.Mock(stdout=b"v16.20.0\n", returncode=0)
+        return mock.Mock(returncode=0)
+
+    with mock.patch("pyt.api.doctor.shutil.which", side_effect=_which), \
+         mock.patch("pyt.api.doctor.subprocess.run", side_effect=_run):
+        with pytest.raises(doctor.InstallError, match="Node 18"):
+            doctor._install_po_token_generator()
+
+
+def test_install_po_token_generator_full_pipeline(tmp_path, monkeypatch):
+    """End-to-end with mocked subprocesses: npm install runs, the
+    launcher gets copied, and the wrapper script ends up at
+    ~/.pyt/bin/pyt-po-token."""
+    fake_pyt = tmp_path / ".pyt"
+    monkeypatch.setattr(doctor, "pyt_data_dir", lambda: fake_pyt)
+    monkeypatch.setattr(doctor, "pyt_bin_dir", lambda: fake_pyt / "bin")
+
+    def _which(name):
+        return f"/usr/bin/{name}" if name in ("node", "npm") else None
+
+    npm_calls = []
+
+    def _run(cmd, **kwargs):
+        if cmd[0] == "/usr/bin/node" and "--version" in cmd:
+            return mock.Mock(stdout=b"v20.10.0\n", returncode=0)
+        if cmd[0] == "/usr/bin/node" and "--check" in cmd:
+            return mock.Mock(returncode=0)
+        if cmd[0] == "/usr/bin/npm" and "install" in cmd:
+            npm_calls.append(cmd)
+            # Pretend npm wrote node_modules.
+            (fake_pyt / "js" / "node_modules").mkdir(parents=True, exist_ok=True)
+            return mock.Mock(returncode=0)
+        return mock.Mock(returncode=0)
+
+    with mock.patch("pyt.api.doctor.shutil.which", side_effect=_which), \
+         mock.patch("pyt.api.doctor.subprocess.run", side_effect=_run):
+        wrapper_path = doctor._install_po_token_generator()
+
+    # Wrapper sits at the expected location.
+    expected_name = "pyt-po-token.cmd" if os.name == "nt" else "pyt-po-token"
+    assert wrapper_path == fake_pyt / "bin" / expected_name
+    assert wrapper_path.is_file()
+
+    # Wrapper content references the launcher and a node binary.
+    text = wrapper_path.read_text()
+    assert "po_token_launcher.js" in text
+    assert "/usr/bin/node" in text or "node" in text
+
+    # Launcher was copied alongside the deps.
+    assert (fake_pyt / "js" / "po_token_launcher.js").is_file()
+
+    # package.json was written so npm install lands in the right dir.
+    pkg = (fake_pyt / "js" / "package.json").read_text()
+    assert '"name": "pyt-po-token-deps"' in pkg
+
+    # npm install was invoked with the right packages and prefix.
+    assert len(npm_calls) == 1
+    cmd = npm_calls[0]
+    assert "--prefix" in cmd
+    assert str(fake_pyt / "js") in cmd
+    assert any("bgutils-js" in arg for arg in cmd)
+    assert any("youtubei.js" in arg for arg in cmd)
+
+
+def test_install_po_token_generator_npm_install_failure(tmp_path, monkeypatch):
+    """If npm install fails, the install raises InstallError with a
+    helpful retry message."""
+    fake_pyt = tmp_path / ".pyt"
+    monkeypatch.setattr(doctor, "pyt_data_dir", lambda: fake_pyt)
+    monkeypatch.setattr(doctor, "pyt_bin_dir", lambda: fake_pyt / "bin")
+
+    def _which(name):
+        return f"/usr/bin/{name}" if name in ("node", "npm") else None
+
+    def _run(cmd, **kwargs):
+        if cmd[0] == "/usr/bin/node" and "--version" in cmd:
+            return mock.Mock(stdout=b"v20.10.0\n", returncode=0)
+        if cmd[0] == "/usr/bin/npm":
+            raise subprocess.CalledProcessError(1, cmd, stderr=b"network error")
+        return mock.Mock(returncode=0)
+
+    with mock.patch("pyt.api.doctor.shutil.which", side_effect=_which), \
+         mock.patch("pyt.api.doctor.subprocess.run", side_effect=_run):
+        with pytest.raises(doctor.InstallError, match="npm install failed"):
+            doctor._install_po_token_generator()
+
+
+def test_install_po_token_generator_verify_failure_rolls_back(tmp_path, monkeypatch):
+    """Verification failure (node --check launcher.js exits non-zero)
+    surfaces as an InstallError. We don't auto-clean here because the
+    user's diagnostic value of having the failing files on disk is
+    higher than the cleanliness value of removing them."""
+    fake_pyt = tmp_path / ".pyt"
+    monkeypatch.setattr(doctor, "pyt_data_dir", lambda: fake_pyt)
+    monkeypatch.setattr(doctor, "pyt_bin_dir", lambda: fake_pyt / "bin")
+
+    def _which(name):
+        return f"/usr/bin/{name}" if name in ("node", "npm") else None
+
+    def _run(cmd, **kwargs):
+        if cmd[0] == "/usr/bin/node" and "--version" in cmd:
+            return mock.Mock(stdout=b"v20.10.0\n", returncode=0)
+        if cmd[0] == "/usr/bin/node" and "--check" in cmd:
+            return mock.Mock(returncode=1)  # syntax check failed
+        if cmd[0] == "/usr/bin/npm":
+            (fake_pyt / "js" / "node_modules").mkdir(parents=True, exist_ok=True)
+            return mock.Mock(returncode=0)
+        return mock.Mock(returncode=0)
+
+    with mock.patch("pyt.api.doctor.shutil.which", side_effect=_which), \
+         mock.patch("pyt.api.doctor.subprocess.run", side_effect=_run):
+        with pytest.raises(doctor.InstallError, match="verification call failed"):
+            doctor._install_po_token_generator()
+
+
+def test_install_po_token_generator_dispatched_via_install_function(tmp_path, monkeypatch):
+    """`doctor.install("po-token-generator")` reaches the special-case
+    path rather than trying plan_install."""
+    monkeypatch.setattr(doctor, "pyt_data_dir", lambda: tmp_path / ".pyt")
+    monkeypatch.setattr(doctor, "pyt_bin_dir", lambda: tmp_path / ".pyt" / "bin")
+
+    with mock.patch(
+        "pyt.api.doctor._install_po_token_generator",
+        return_value=tmp_path / ".pyt" / "bin" / "pyt-po-token",
+    ) as mock_install:
+        doctor.install("po-token-generator")
+
+    mock_install.assert_called_once()
+
+
+def test_parse_node_major():
+    assert doctor._parse_node_major("v20.10.0") == 20
+    assert doctor._parse_node_major("18.0.0") == 18
+    assert doctor._parse_node_major("garbage") is None
+    assert doctor._parse_node_major("v") is None
 
 
 def test_install_translates_download_failure(tmp_path, monkeypatch):

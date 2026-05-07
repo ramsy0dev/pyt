@@ -21,6 +21,55 @@ logic is private and changes frequently. What pyt does instead:
 - Auto-retries the download once with a freshly-generated token when
   attestation fails mid-stream.
 
+## Quickest path: auto-install pyt's bundled generator
+
+If you have **Node 18+** on PATH, the doctor can set up an end-to-end
+generator with one command:
+
+```bash
+pyt --doctor --install po-token-generator
+```
+
+This:
+
+1. Verifies `node` and `npm` are on PATH (errors clearly if not — we
+   don't auto-install Node; that's your package manager's job).
+2. Verifies Node is 18+ (older versions lack the global `fetch` the
+   launcher uses).
+3. Creates `~/.pyt/js/`, writes a minimal `package.json` there, and
+   runs `npm install bgutils-js@^3.2.0 youtubei.js@^14`. Both packages
+   are pure-JS BotGuard implementations — no Chrome, no puppeteer.
+4. Copies the vendored launcher script (`pyt/data/po_token_launcher.js`)
+   into the install dir.
+5. Creates a wrapper at `~/.pyt/bin/pyt-po-token` (or `pyt-po-token.cmd`
+   on Windows) that runs `node po_token_launcher.js "$@"` with
+   `NODE_PATH` pointing at the local `node_modules`. The wrapper
+   directory is already on pyt's `PATH`, so `shutil.which` finds it.
+6. Runs `pyt-po-token --check` to verify everything links up.
+
+After that, `--po-token-cmd "pyt-po-token"` (or `pyt-po-token <visitor_data>`)
+gets you a fresh token. The Client's auto-retry logic handles
+regeneration on `ATTESTATION_REQUIRED` automatically.
+
+```bash
+# CLI
+pyt <url> --po-token-cmd "pyt-po-token"
+
+# Python API
+from pyt import Client
+client = Client(po_token_cmd="pyt-po-token")
+```
+
+If npm install fails, re-run with `pyt -vv --doctor --install
+po-token-generator` to see node's stderr — the most common cause is
+a missing or corporate-proxy-blocked npm registry.
+
+The generator stops working when YouTube's BotGuard wire format
+changes upstream. Both bundled npm packages are actively maintained;
+the doctor pins minor versions and bumping the pin (in
+`pyt/api/doctor.py`'s `_POT_NPM_PACKAGES` constant) is usually all
+that's needed when that happens.
+
 ## When you need one
 
 Most public videos work without a PO token. You'll typically hit
@@ -135,16 +184,17 @@ to seed the cache, and once if the server rejects the cached token.
 
 ## Generators that work today
 
-The community has a few token generators we know work:
+| Generator | How to install | Use with |
+|---|---|---|
+| **`pyt-po-token` (bundled)** | `pyt --doctor --install po-token-generator` (needs Node 18+) | `--po-token-cmd "pyt-po-token"` |
+| [`bgutil-pot`](https://github.com/Brainicism/bgutil-ytdlp-pot-provider) | Their own README | `--po-token-cmd "bgutil-pot ..."` |
+| [`youtube-po-token-generator`](https://www.npmjs.com/package/youtube-po-token-generator) | `npm install -g youtube-po-token-generator` | `--po-token-script ~/.local/lib/wrapper.js` |
+| Manual extraction (DevTools) | Open YouTube → DevTools → Network → `/youtubei/v1/player` request body | `--po-token <token>` |
 
-| Generator | Notes |
-|---|---|
-| [`bgutil-pot`](https://github.com/Brainicism/bgutil-ytdlp-pot-provider) | Node-based; designed for yt-dlp but works standalone. Use with `--po-token-cmd` |
-| [`youtube-po-token-generator`](https://www.npmjs.com/package/youtube-po-token-generator) | npm package; runs on Node. Use with `--po-token-script` after writing a small wrapper |
-| Manual extraction (DevTools) | Slowest but most reliable. Use with `--po-token` |
-
-We don't bundle any of these — token generators move fast and live
-better as their own projects.
+The bundled option is the path of least resistance: one command, one
+generator, and the version pin lives in pyt itself so we can rev it
+when YouTube changes the protocol. Use it unless you have specific
+reasons to prefer one of the others.
 
 ## Doctor
 
@@ -187,14 +237,20 @@ token, so users hitting it for the first time get inline guidance.
 
 ## Limitations
 
-- **We don't generate tokens.** That requires running BotGuard JS,
-  which is its own project. Use one of the community generators
-  above.
+- **We don't generate tokens in pure Python.** BotGuard runs in JS;
+  the bundled generator shells out to Node.js. If you don't have Node
+  on PATH, fall back to manual extraction or one of the community
+  generators.
 - **Auto-retry happens at most once.** If the second attempt fails,
   the error propagates so the user can investigate (perhaps the
-  generator is broken, or the requested video is genuinely gated
-  beyond what a token can unlock).
+  generator is broken, the npm install needs updating, or the video
+  is genuinely gated beyond what a token can unlock).
 - **The legacy `Stream.download` path doesn't auto-retry.** Only the
   modern `CombinedDownload` does. The CLI's `pyt <url>` command runs
   the generator once at startup and passes the result as a static
   token; if it expires mid-download, re-run.
+- **The bundled generator is best-effort.** It uses two pure-JS
+  packages (`bgutils-js`, `youtubei.js`) that track YouTube's private
+  BotGuard API. When YouTube changes that API, both packages publish
+  fixes — bumping pyt's pinned versions (in
+  `pyt/api/doctor.py`'s `_POT_NPM_PACKAGES`) restores functionality.

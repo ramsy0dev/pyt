@@ -164,6 +164,20 @@ def known_tools() -> List[Tool]:
             installable=False,
             version_flag="--version",
         ),
+        Tool(
+            name="pyt-po-token",
+            binary="pyt-po-token",
+            description=(
+                "pyt's vendored PO-token generator (use with "
+                "--po-token-cmd 'pyt-po-token')"
+            ),
+            required_for=["po_token (auto-install via doctor)"],
+            install_url="run: pyt --doctor --install po-token-generator",
+            installable=True,
+            # Wrapper exits 1 on --version (we only handle YouTube args
+            # via positional argv); --check exits 0 for parse-OK.
+            version_flag="--check",
+        ),
     ]
 
 
@@ -217,7 +231,11 @@ def feature_status(tools: List[Tool]) -> List[Feature]:
     by_name = {t.name: t for t in tools}
     have = lambda n: by_name.get(n) is not None and by_name[n].found  # noqa: E731
     have_any_js_runtime = have("node") or have("bun") or have("deno")
-    have_any_po_token_tool = have_any_js_runtime or have("bgutil-pot")
+    have_any_po_token_tool = (
+        have("pyt-po-token")
+        or have("bgutil-pot")
+        or have_any_js_runtime
+    )
 
     return [
         Feature(
@@ -298,7 +316,8 @@ def plan_install(tool_name: str) -> InstallPlan:
     if tool_name == "realesrgan":
         return _plan_realesrgan()
     raise InstallError(
-        f"unknown tool {tool_name!r}; installable tools: ffmpeg, realesrgan"
+        f"unknown tool {tool_name!r}; installable tools: ffmpeg, realesrgan, "
+        "po-token-generator"
     )
 
 
@@ -311,6 +330,12 @@ def install(
 
     :param on_progress: optional callback ``(bytes_done, total_or_None)``.
     """
+    if tool_name == "po-token-generator":
+        # PO-token generator doesn't fit the archive-download pipeline:
+        # it needs npm to install youtubei.js + bgutils-js, plus a
+        # vendored launcher script and a platform-specific wrapper.
+        return _install_po_token_generator(on_progress=on_progress)
+
     plan = plan_install(tool_name)
     pyt_bin_dir().mkdir(parents=True, exist_ok=True)
 
@@ -456,6 +481,200 @@ def _verify(binary: Path, tool_name: str) -> bool:
     return result.returncode in (0, 1)  # ncnn-vulkan exits 1 on -h, that's fine
 
 
+# ── po-token-generator installer (no archive — npm-based) ────────────────
+
+
+# Pinned npm versions. Bumping them is the standard maintenance lever
+# when YouTube changes the BotGuard wire format upstream.
+_POT_NPM_PACKAGES = (
+    "bgutils-js@^3.2.0",
+    "youtubei.js@^14",
+)
+_POT_LAUNCHER_FILENAME = "po_token_launcher.js"
+_POT_WRAPPER_NAME = "pyt-po-token"
+_POT_TIMEOUT_SECONDS = 300  # npm installs can be slow on first run
+
+
+def _install_po_token_generator(
+    *,
+    on_progress: Optional[Callable[[int, Optional[int]], None]] = None,
+) -> Path:
+    """Install a working PO-token generator under ``~/.pyt/``.
+
+    Lays down four things:
+
+    1. ``~/.pyt/js/`` directory holding a tiny ``package.json`` and the
+       npm-installed ``node_modules/`` for bgutils-js + youtubei.js.
+    2. ``~/.pyt/js/po_token_launcher.js`` — the vendored launcher
+       script copied out of ``pyt/data/``.
+    3. ``~/.pyt/bin/pyt-po-token`` (or ``pyt-po-token.cmd`` on Windows)
+       — a thin wrapper that runs ``node po_token_launcher.js "$@"``
+       with ``NODE_PATH`` pointing at the local ``node_modules``.
+    4. A verification call to the wrapper to make sure node + the
+       packages + the launcher all line up.
+
+    Doesn't install ``node`` itself — that's the user's package
+    manager's job. Errors clearly with the install URL when node /
+    npm aren't on PATH.
+
+    :param on_progress: ignored — npm prints its own progress to stderr.
+        We forward stdout/stderr so users see what's happening.
+    """
+    # 1. Verify node + npm
+    node_path = shutil.which("node")
+    if not node_path:
+        raise InstallError(
+            "po-token-generator install requires Node.js, but `node` is "
+            "not on PATH. Install from https://nodejs.org (LTS is fine)."
+        )
+    npm_path = shutil.which("npm")
+    if not npm_path:
+        raise InstallError(
+            "po-token-generator install requires npm, but `npm` is not "
+            "on PATH. npm ships with Node.js — reinstalling Node from "
+            "https://nodejs.org should fix it."
+        )
+
+    # 2. Verify Node 18+ (we need global fetch).
+    try:
+        result = subprocess.run(  # nosec
+            [node_path, "--version"], capture_output=True, check=True, timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise InstallError(f"could not run {node_path} --version: {exc}") from exc
+    node_version = result.stdout.decode("utf-8", errors="replace").strip()
+    major = _parse_node_major(node_version)
+    if major is not None and major < 18:
+        raise InstallError(
+            f"po-token-generator requires Node 18+ (detected {node_version}). "
+            "Older Node lacks the global `fetch` the launcher uses."
+        )
+
+    js_dir = pyt_data_dir() / "js"
+    js_dir.mkdir(parents=True, exist_ok=True)
+
+    # 3. Write a minimal package.json so npm install lands in the
+    # right place and doesn't try to walk up looking for one.
+    package_json = js_dir / "package.json"
+    package_json.write_text(
+        '{\n  "name": "pyt-po-token-deps",\n'
+        '  "private": true,\n'
+        '  "version": "0.0.0",\n'
+        '  "description": "vendored deps for pyt po-token launcher"\n'
+        '}\n',
+        encoding="utf-8",
+    )
+
+    # 4. npm install. We pipe stdout/stderr through to the parent so
+    # the user sees what's happening (npm is chatty about download
+    # progress, and a silent install of 200+ files would feel hung).
+    cmd = [npm_path, "install", "--no-audit", "--no-fund", "--no-progress",
+           "--prefix", str(js_dir), *_POT_NPM_PACKAGES]
+    logger.info("doctor: running %s", " ".join(cmd))
+    try:
+        subprocess.run(  # nosec — argv constructed by us
+            cmd,
+            check=True,
+            timeout=_POT_TIMEOUT_SECONDS,
+        )
+    except subprocess.CalledProcessError as exc:
+        raise InstallError(
+            f"npm install failed (exit {exc.returncode}). "
+            "Check your network connection and try again."
+        ) from exc
+    except subprocess.TimeoutExpired:
+        raise InstallError(
+            f"npm install timed out after {_POT_TIMEOUT_SECONDS}s. "
+            "First-time installs over slow connections may need more time; "
+            "re-run the doctor command."
+        )
+
+    # 5. Copy the vendored launcher.
+    launcher_dest = js_dir / _POT_LAUNCHER_FILENAME
+    launcher_src = _vendored_launcher_path()
+    if not launcher_src.is_file():
+        raise InstallError(
+            f"vendored launcher missing from package: expected at {launcher_src}"
+        )
+    shutil.copy2(launcher_src, launcher_dest)
+
+    # 6. Create the wrapper at ~/.pyt/bin/pyt-po-token.
+    bin_dir = pyt_bin_dir()
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    if os.name == "nt":
+        wrapper_path = bin_dir / f"{_POT_WRAPPER_NAME}.cmd"
+        # %~dp0 = directory of this batch file, ending in backslash.
+        # NODE_PATH lets node resolve `require('bgutils-js')` from the
+        # vendored node_modules without polluting the user's globals.
+        wrapper_path.write_text(
+            "@echo off\r\n"
+            f'set "NODE_PATH={js_dir / "node_modules"}"\r\n'
+            f'"{node_path}" "{launcher_dest}" %*\r\n',
+            encoding="utf-8",
+        )
+    else:
+        wrapper_path = bin_dir / _POT_WRAPPER_NAME
+        wrapper_path.write_text(
+            "#!/usr/bin/env sh\n"
+            f'export NODE_PATH="{js_dir / "node_modules"}"\n'
+            f'exec "{node_path}" "{launcher_dest}" "$@"\n',
+            encoding="utf-8",
+        )
+        _make_executable(wrapper_path)
+
+    # 7. Verify by running the wrapper. We don't actually generate a
+    # token in the doctor (that hits YouTube and is slow); instead we
+    # require it to start without crashing on missing dependencies.
+    # The launcher hard-fails fast if its `require()`s don't resolve.
+    if not _verify_po_token_install(wrapper_path):
+        raise InstallError(
+            f"installed po-token-generator at {wrapper_path} but the "
+            "verification call failed; rerun with `pyt -vv --doctor "
+            "--install po-token-generator` to see node's stderr."
+        )
+
+    return wrapper_path
+
+
+def _vendored_launcher_path() -> Path:
+    """Resolve the launcher file shipped inside the pyt package."""
+    return Path(__file__).resolve().parent.parent / "data" / _POT_LAUNCHER_FILENAME
+
+
+def _parse_node_major(version: str) -> Optional[int]:
+    """Pull the major version out of strings like ``v20.10.0``."""
+    text = version.strip().lstrip("v")
+    head = text.split(".", 1)[0]
+    try:
+        return int(head)
+    except ValueError:
+        return None
+
+
+def _verify_po_token_install(wrapper_path: Path) -> bool:
+    """Probe the install with a fast, network-free check.
+
+    Strategy: we can't easily cheaply verify token generation without
+    an HTTP call. Instead we just check that node can load the
+    launcher and parse it (`node --check <launcher>`). If npm
+    install missed a dependency, this fails with a useful error.
+    """
+    js_dir = pyt_data_dir() / "js"
+    launcher = js_dir / _POT_LAUNCHER_FILENAME
+    node_path = shutil.which("node")
+    if not node_path or not launcher.is_file():
+        return False
+    try:
+        result = subprocess.run(  # nosec
+            [node_path, "--check", str(launcher)],
+            capture_output=True,
+            timeout=15,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return result.returncode == 0
+
+
 # ── per-tool plans ────────────────────────────────────────────────────────
 
 
@@ -594,6 +813,7 @@ def render_status(tools: List[Tool], features: List[Feature]) -> str:
     out.append("Install missing tools with:")
     out.append("  pyt --doctor --install ffmpeg")
     out.append("  pyt --doctor --install realesrgan")
+    out.append("  pyt --doctor --install po-token-generator   (needs node)")
     out.append("  pyt --doctor --install all")
     return "\n".join(out)
 
@@ -617,5 +837,14 @@ _MANUAL_INSTALL_HINTS = {
 def _missing_hint(tool: Tool) -> str:
     """Render the per-tool "how do I install this?" suffix."""
     if tool.installable:
-        return f"  (run: pyt --doctor --install {tool.name})"
+        # The doctor's --install command takes an "install key" that's
+        # not always the same as the tool name (e.g. the wrapper binary
+        # `pyt-po-token` is installed by --install po-token-generator).
+        install_name = _INSTALL_KEY_FOR_TOOL.get(tool.name, tool.name)
+        return f"  (run: pyt --doctor --install {install_name})"
     return _MANUAL_INSTALL_HINTS.get(tool.name, "")
+
+
+_INSTALL_KEY_FOR_TOOL = {
+    "pyt-po-token": "po-token-generator",
+}

@@ -17,6 +17,13 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
 ]
+# Vendored data files (PO-token JS launcher) need to ship inside the
+# wheel so `pyt --doctor --install po-token-generator` can copy them out
+# at install time. Without this glob, pyt/data/*.js gets dropped by the
+# wheel builder.
+include = [
+    { path = "pyt/data/*.js", format = ["sdist", "wheel"] },
+]
 
 [tool.poetry.dependencies]
 python = ">=3.10,<4.0"

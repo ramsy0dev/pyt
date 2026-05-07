@@ -1243,9 +1243,26 @@ def _run_doctor(args) -> int:
         print(doc.render_status(tools, features))
         return 0
 
-    targets = ["ffmpeg", "realesrgan"] if args.install == "all" else [args.install]
+    targets = (
+        ["ffmpeg", "realesrgan", "po-token-generator"]
+        if args.install == "all"
+        else [args.install]
+    )
     for tool in targets:
         _print_section(f"Installing {tool}")
+
+        # po-token-generator runs via npm — no archive download to
+        # preview, no progress callback; let doc.install drive its
+        # own subprocess output.
+        if tool == "po-token-generator":
+            try:
+                installed = doc.install(tool)
+            except doc.InstallError as exc:
+                _print_err(f"install failed: {exc}")
+                return 1
+            _print_ok(f"installed at  {DM}{installed}{R}")
+            continue
+
         try:
             plan = doc.plan_install(tool)
         except doc.InstallError as exc:

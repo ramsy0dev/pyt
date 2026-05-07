@@ -97,8 +97,9 @@ Install missing binaries on the user's behalf — they go in
 finds them without polluting your shell:
 
 ```bash
-pyt --doctor --install ffmpeg       # Windows / Linux only (use Homebrew on macOS)
-pyt --doctor --install realesrgan   # all platforms
+pyt --doctor --install ffmpeg                # Windows / Linux only (use Homebrew on macOS)
+pyt --doctor --install realesrgan            # all platforms
+pyt --doctor --install po-token-generator    # needs Node 18+ on PATH
 pyt --doctor --install all
 ```
 
@@ -108,6 +109,7 @@ Sources:
 |---|---|---|---|
 | ffmpeg | [gyan.dev essentials build](https://www.gyan.dev/ffmpeg/builds/) | [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds/releases) | use `brew install ffmpeg` |
 | realesrgan-ncnn-vulkan | [xinntao/Real-ESRGAN releases](https://github.com/xinntao/Real-ESRGAN/releases) | same | same |
+| po-token-generator | `npm install bgutils-js youtubei.js` into `~/.pyt/js/` + wrapper at `~/.pyt/bin/pyt-po-token` | same | same |
 
 ---
 
@@ -569,15 +571,15 @@ handles:
 
 What's missing / works but not great:
 
-- **PO token.** Required by some accounts for some videos. We don't
-  generate them (BotGuard runs in a real browser), but the modern
-  `Client` has full plumbing for any external generator: `po_token=` for
-  a static value, `po_token_provider=` for a Python callable,
-  `po_token_cmd=` to shell out, or `po_token_script=` to run a JS file
-  with whatever JS runtime is on `PATH` (node / bun / deno). On
-  `ATTESTATION_REQUIRED`, the download path refreshes the token via the
-  configured provider and retries once. Run `pyt --doctor` to see which
-  runtimes / generators are installed. See
+- **PO token.** Required by some accounts for some videos. With Node
+  18+ on PATH, `pyt --doctor --install po-token-generator` gets you
+  end-to-end support: the doctor `npm install`s the BotGuard JS
+  packages into `~/.pyt/js/` and drops a `pyt-po-token` wrapper into
+  `~/.pyt/bin/`. Use it via `--po-token-cmd "pyt-po-token"`. The modern
+  `Client` also accepts arbitrary external generators via
+  `po_token=` / `po_token_provider=` / `po_token_cmd=` / `po_token_script=`,
+  and auto-retries downloads once with a fresh token on
+  `ATTESTATION_REQUIRED`. See
   [docs/features/po-token.md](docs/features/po-token.md) for the full
   workflow.
 - **Live streams.** Metadata yes, downloads no. SABR live needs `SABR_SEEK` /
