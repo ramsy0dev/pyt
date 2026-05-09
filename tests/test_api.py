@@ -1,7 +1,7 @@
 """Tests for the modern :mod:`pyt.api` surface."""
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
 
@@ -399,3 +399,252 @@ def test_client_search_returns_modern_wrapper():
 
     assert isinstance(result, SearchResults)
     assert result.query == "rickroll"
+
+
+# ── Live stream / VOD / upcoming ───────────────────────────────────────────
+
+
+def _make_fake_legacy(*, is_live=False, is_live_content=False, is_upcoming=False,
+                      hls_url=None, scheduled_ts=None):
+    """Return a minimal mock _LegacyYouTube shaped for live-stream tests."""
+    fake = mock.MagicMock()
+    fake.video_id = "liveXYZ"
+    fake.title = "Live Test"
+    fake.publish_date = None
+    fake.vid_info = {
+        "videoDetails": {
+            "title": "Live Test",
+            "channelId": "UC123",
+            "author": "TestChannel",
+            "lengthSeconds": "0",
+            "isLive": is_live,
+            "isLiveContent": is_live_content,
+            "isUpcoming": is_upcoming,
+        },
+        "streamingData": {
+            "hlsManifestUrl": hls_url,
+        } if hls_url else {},
+        "playabilityStatus": {
+            "offlineSlate": {
+                "scheduledStartTime": str(scheduled_ts),
+            },
+        } if scheduled_ts else {},
+    }
+    fake.check_availability.return_value = None
+    return fake
+
+
+def test_hydrate_meta_active_live_stream():
+    from pyt.api.video import _hydrate_meta
+
+    fake = _make_fake_legacy(is_live=True, is_live_content=True,
+                             hls_url="https://manifest.example.com/live.m3u8")
+    meta = _hydrate_meta(fake, url="https://youtube.com/watch?v=liveXYZ")
+
+    assert meta.is_live is True
+    assert meta.is_live_content is True
+    assert meta.hls_manifest_url == "https://manifest.example.com/live.m3u8"
+
+
+def test_hydrate_meta_vod_not_marked_as_live():
+    """A finished live broadcast (isLiveContent=True, isLive=False) must
+    NOT set is_live — it's a downloadable VOD."""
+    from pyt.api.video import _hydrate_meta
+
+    fake = _make_fake_legacy(is_live=False, is_live_content=True)
+    meta = _hydrate_meta(fake, url="https://youtube.com/watch?v=liveXYZ")
+
+    assert meta.is_live is False
+    assert meta.is_live_content is True
+    assert meta.hls_manifest_url is None
+
+
+def test_hydrate_meta_upcoming_raises_livestreamupcoming():
+    from pyt.api.errors import LiveStreamUpcoming
+    from pyt.api.video import _hydrate_meta
+
+    scheduled_ts = 1704124800  # 2024-01-01 18:00:00 UTC
+    fake = _make_fake_legacy(is_upcoming=True, scheduled_ts=scheduled_ts)
+
+    with pytest.raises(LiveStreamUpcoming) as exc_info:
+        _hydrate_meta(fake, url="https://youtube.com/watch?v=liveXYZ")
+
+    err = exc_info.value
+    assert err.video_id == "liveXYZ"
+    assert err.scheduled_start is not None
+    assert err.scheduled_start == datetime.fromtimestamp(scheduled_ts, tz=timezone.utc)
+
+
+def test_hydrate_meta_upcoming_no_start_time():
+    """Upcoming with no offlineSlate still raises LiveStreamUpcoming
+    without a start time rather than crashing."""
+    from pyt.api.errors import LiveStreamUpcoming
+    from pyt.api.video import _hydrate_meta
+
+    fake = _make_fake_legacy(is_upcoming=True)
+    with pytest.raises(LiveStreamUpcoming) as exc_info:
+        _hydrate_meta(fake, url="https://youtube.com/watch?v=liveXYZ")
+    assert exc_info.value.scheduled_start is None
+
+
+def test_video_is_live_content_property():
+    from pyt.api.video import _hydrate_meta
+
+    fake = _make_fake_legacy(is_live=False, is_live_content=True)
+    meta = _hydrate_meta(fake, url="https://youtube.com/watch?v=liveXYZ")
+    video = Video(fake, meta=meta)
+    assert video.is_live_content is True
+    assert video.is_live is False
+    assert video.hls_manifest_url is None
+
+
+def test_record_live_blocks_on_non_live(cipher_signature):
+    from pyt.api.errors import LiveStreamNotSupported
+
+    video = _make_video(cipher_signature)
+    assert not video.is_live
+    with pytest.raises(LiveStreamNotSupported):
+        video.record_live()
+
+
+def test_record_live_calls_ffmpeg(tmp_path):
+    from pyt.api.video import _hydrate_meta
+
+    hls_url = "https://manifest.example.com/live.m3u8"
+    fake = _make_fake_legacy(is_live=True, is_live_content=True, hls_url=hls_url)
+    meta = _hydrate_meta(fake, url="https://youtube.com/watch?v=liveXYZ")
+    video = Video(fake, meta=meta)
+
+    with mock.patch("pyt.api.video.shutil.which", return_value="/usr/bin/ffmpeg"), \
+         mock.patch("pyt.api.video.subprocess.run") as mock_run:
+        mock_run.return_value = mock.Mock(returncode=0)
+        result = video.record_live(output_path=str(tmp_path))
+
+    assert result.suffix == ".ts"
+    assert result.parent == tmp_path
+    call_args = mock_run.call_args[0][0]
+    assert call_args[0] == "/usr/bin/ffmpeg"
+    assert hls_url in call_args
+    assert "-c" in call_args and "copy" in call_args
+
+
+def test_record_live_passes_timeout(tmp_path):
+    from pyt.api.video import _hydrate_meta
+
+    hls_url = "https://manifest.example.com/live.m3u8"
+    fake = _make_fake_legacy(is_live=True, hls_url=hls_url)
+    meta = _hydrate_meta(fake, url="https://youtube.com/watch?v=liveXYZ")
+    video = Video(fake, meta=meta)
+
+    with mock.patch("pyt.api.video.shutil.which", return_value="/usr/bin/ffmpeg"), \
+         mock.patch("pyt.api.video.subprocess.run") as mock_run:
+        mock_run.return_value = mock.Mock(returncode=0)
+        video.record_live(output_path=str(tmp_path), timeout=60)
+
+    cmd = mock_run.call_args[0][0]
+    assert "-t" in cmd
+    assert "60" in cmd
+
+
+def test_record_live_raises_when_ffmpeg_missing(tmp_path):
+    from pyt.api.video import _hydrate_meta
+
+    fake = _make_fake_legacy(is_live=True, hls_url="https://x.example.com/live.m3u8")
+    meta = _hydrate_meta(fake, url="https://youtube.com/watch?v=liveXYZ")
+    video = Video(fake, meta=meta)
+
+    with mock.patch("pyt.api.video.shutil.which", return_value=None):
+        with pytest.raises(RuntimeError, match="ffmpeg not found"):
+            video.record_live(output_path=str(tmp_path))
+
+
+# ── Age restriction ────────────────────────────────────────────────────────
+
+
+def _make_age_restricted_video(age_restricted: bool = True):
+    """Return a Video whose is_age_restricted flag is pre-set."""
+    from pyt.api.models import VideoMeta, Channel
+    from datetime import timedelta
+
+    meta = VideoMeta(
+        video_id="agexYZ",
+        url="https://youtube.com/watch?v=agexYZ",
+        title="Age Restricted Test",
+        author=Channel(id="UC1", name="Test"),
+        length=timedelta(minutes=10),
+        is_age_restricted=age_restricted,
+    )
+    fake_legacy = mock.MagicMock()
+    fake_legacy.video_id = "agexYZ"
+    return Video(fake_legacy, meta=meta)
+
+
+def test_age_restricted_video_has_property():
+    video = _make_age_restricted_video(age_restricted=True)
+    assert video.is_age_restricted is True
+
+
+def test_non_age_restricted_video_has_property():
+    video = _make_age_restricted_video(age_restricted=False)
+    assert video.is_age_restricted is False
+
+
+def test_streams_raises_age_restricted_immediately_without_auth():
+    """Accessing .streams without cookies should raise AgeRestricted before
+    any network call rather than failing deep in bypass_age_gate()."""
+    from pyt.api.errors import AgeRestricted
+
+    video = _make_age_restricted_video(age_restricted=True)
+    # _client is None → no auth configured → must raise immediately.
+    assert video._client is None
+    with pytest.raises(AgeRestricted) as exc_info:
+        _ = video.streams
+    err = exc_info.value
+    assert err.video_id == "agexYZ"
+    assert "cookies_from_browser" in str(err)
+
+
+def test_streams_does_not_raise_age_restricted_when_cookies_configured():
+    """When the client has cookies, the guard must not short-circuit —
+    the stream fetch should be allowed to proceed (and may succeed)."""
+    from pyt.api.errors import AgeRestricted
+
+    video = _make_age_restricted_video(age_restricted=True)
+
+    fake_client = mock.MagicMock()
+    fake_client._cookies_browser = "chrome"
+    fake_client._cookies_path = None
+    fake_client._use_oauth = False
+    video._client = fake_client
+
+    # The legacy fmt_streams call will succeed via our mock.
+    video._legacy.fmt_streams = []
+
+    # Should NOT raise AgeRestricted — the guard must pass through.
+    streams = video.streams
+    assert streams is not None
+
+
+def test_age_restricted_is_not_video_unavailable():
+    """AgeRestricted must NOT be a subclass of VideoUnavailable — an age-
+    gated video is available, it just needs authentication."""
+    from pyt.api.errors import AgeRestricted, VideoUnavailable
+
+    err = AgeRestricted("agexYZ")
+    assert not isinstance(err, VideoUnavailable)
+    assert err.video_id == "agexYZ"
+
+
+def test_age_restricted_error_message_mentions_cookies():
+    from pyt.api.errors import AgeRestricted
+
+    msg = str(AgeRestricted("agexYZ"))
+    assert "cookies_from_browser" in msg
+    assert "cookies" in msg
+
+
+def test_hydrate_meta_sets_is_age_restricted(cipher_signature):
+    """For a normal (non-age-restricted) fixture, is_age_restricted must
+    be False — we're checking the happy-path wiring here."""
+    meta = _hydrate_meta(cipher_signature, url="https://youtube.com/watch?v=2lAe1cqCOXo")
+    assert meta.is_age_restricted is False

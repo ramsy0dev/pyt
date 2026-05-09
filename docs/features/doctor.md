@@ -86,7 +86,15 @@ You can verify by running `pyt --doctor` after install:
 | Tool | Windows x86_64 | Linux x86_64 | Linux arm64 | macOS |
 |---|---|---|---|---|
 | ffmpeg | [gyan.dev essentials](https://www.gyan.dev/ffmpeg/builds/) | [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds/releases) | BtbN linuxarm64 | use `brew install ffmpeg` |
-| realesrgan-ncnn-vulkan | [xinntao/Real-ESRGAN releases](https://github.com/xinntao/Real-ESRGAN/releases) | xinntao | xinntao | xinntao |
+| realesrgan-ncnn-vulkan | [xinntao/Real-ESRGAN v0.2.5.0](https://github.com/xinntao/Real-ESRGAN/releases/tag/v0.2.5.0) | same | same | same |
+
+**realesrgan source note:** the doctor downloads from the
+`xinntao/Real-ESRGAN` Python project releases (not the
+`Real-ESRGAN-ncnn-vulkan` repo). That bundle packages the
+`realesrgan-ncnn-vulkan` binary **and** the model files
+(`realesrgan-x4plus`, `realesrgan-x4plus-anime`, etc.) in the same
+zip. Installing from the binary-only repo would leave the models
+missing, causing runtime failures.
 
 **macOS ffmpeg note:** auto-downloading a working build for both Intel
 and Apple Silicon, with the codec set we use, is genuinely harder than

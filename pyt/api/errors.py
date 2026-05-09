@@ -7,6 +7,7 @@ useful bug report without further plumbing.
 """
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Optional
 
 
@@ -27,18 +28,75 @@ class VideoUnavailable(PytError):
         super().__init__(f"video {video_id} is {reason}")
 
 
-class AgeRestricted(VideoUnavailable):
-    """Tier-3 age-gated content that requires OAuth to access."""
+class AgeRestricted(PytError):
+    """Video is age-restricted and requires a signed-in browser session.
+
+    Unlike :class:`VideoUnavailable`, the video *exists* — it just requires
+    proof of age that only an authenticated cookie jar can provide.
+
+    The fix is to pass cookies from a browser where you are already signed in
+    and have completed YouTube's age-verification flow::
+
+        # Extract live cookies from a running Chrome profile:
+        client = Client(cookies_from_browser="chrome")
+
+        # Or export a Netscape-format cookie file from your browser:
+        client = Client(cookies="~/cookies.txt")
+
+    Supported browser values: chrome, firefox, brave, edge, safari, opera.
+    """
 
     def __init__(self, video_id: str, url: Optional[str] = None):
-        super().__init__(video_id, reason="age-restricted", url=url)
+        self.video_id = video_id
+        self.url = url
+        super().__init__(
+            f"video {video_id} is age-restricted and requires authentication. "
+            "Provide cookies from a signed-in browser:\n"
+            "  Client(cookies_from_browser='chrome')  # live extraction\n"
+            "  Client(cookies='path/to/cookies.txt')  # Netscape export"
+        )
 
 
 class LiveStreamNotSupported(VideoUnavailable):
-    """The URL points at a live stream; only metadata is available."""
+    """The URL points at an active live stream.
+
+    Stream downloads are not supported while a stream is live. Use
+    :meth:`Video.record_live` to capture the broadcast via its HLS
+    manifest, or wait until the stream ends and download the VOD.
+    """
 
     def __init__(self, video_id: str, url: Optional[str] = None):
-        super().__init__(video_id, reason="a live stream (downloads not supported)", url=url)
+        super().__init__(
+            video_id,
+            reason=(
+                "an active live stream (use Video.record_live() to capture "
+                "via HLS, or wait for the VOD)"
+            ),
+            url=url,
+        )
+
+
+class LiveStreamUpcoming(PytError):
+    """The URL points at a scheduled live stream that has not yet started.
+
+    :attr:`scheduled_start` is a UTC :class:`datetime` when known, or
+    ``None`` when YouTube didn't include a start time in the response.
+    """
+
+    def __init__(
+        self,
+        video_id: str,
+        url: Optional[str] = None,
+        scheduled_start: Optional[datetime] = None,
+    ):
+        self.video_id = video_id
+        self.url = url
+        self.scheduled_start = scheduled_start
+        when = (
+            f" (scheduled for {scheduled_start.isoformat()})"
+            if scheduled_start else ""
+        )
+        super().__init__(f"video {video_id} is a scheduled live stream that hasn't started yet{when}")
 
 
 class NoMatchingStream(PytError):

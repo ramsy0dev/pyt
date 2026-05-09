@@ -2,9 +2,12 @@
 from __future__ import annotations
 
 import logging
+import shutil
+import subprocess  # nosec
 import warnings
-from datetime import datetime, timedelta
-from typing import Any, Callable, Dict, List, Optional
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Union
 
 import pyt.exceptions as legacy_exc
 from pyt.__main__ import YouTube as _LegacyYouTube
@@ -14,6 +17,8 @@ logger = logging.getLogger(__name__)
 from pyt.api.errors import (
     AgeRestricted,
     LiveStreamNotSupported,
+    LiveStreamUpcoming,
+    PostProcessError,
     PytError,
     VideoUnavailable,
 )
@@ -26,6 +31,10 @@ def _translate(exc: BaseException, *, video_id: Optional[str], url: Optional[str
     if isinstance(exc, legacy_exc.AgeRestrictedError):
         return AgeRestricted(video_id=exc.video_id, url=url)
     if isinstance(exc, legacy_exc.LiveStreamError):
+        # The legacy layer raises LiveStreamError when it hits liveStreamability
+        # in the stream manifest. By the time we reach here we've already
+        # raised LiveStreamUpcoming in _hydrate_meta for scheduled streams,
+        # so this path is always an active broadcast.
         return LiveStreamNotSupported(video_id=exc.video_id, url=url)
     if isinstance(exc, legacy_exc.VideoUnavailable):
         reason_map = {
@@ -152,12 +161,54 @@ class Video:
 
     @property
     def is_live(self) -> bool:
+        """``True`` while the broadcast is actively streaming."""
         return self._meta.is_live
 
     @property
+    def is_live_content(self) -> bool:
+        """``True`` for VODs that were originally broadcast as live streams."""
+        return self._meta.is_live_content
+
+    @property
+    def hls_manifest_url(self) -> Optional[str]:
+        """HLS manifest URL for active live streams; ``None`` otherwise."""
+        return self._meta.hls_manifest_url
+
+    @property
+    def is_age_restricted(self) -> bool:
+        """``True`` when YouTube requires age-verification to access this video.
+
+        If ``True``, :attr:`streams` will raise :class:`AgeRestricted` unless
+        the :class:`Client` was constructed with browser cookies from a
+        signed-in, age-verified account::
+
+            client = Client(cookies_from_browser="chrome")
+        """
+        return self._meta.is_age_restricted
+
+    @property
     def streams(self) -> StreamSet:
-        """The video's stream catalog. Lazily fetched once, then cached."""
+        """The video's stream catalog. Lazily fetched once, then cached.
+
+        Raises :class:`AgeRestricted` immediately (without extra network
+        calls) when :attr:`is_age_restricted` is ``True`` and the client
+        has not supplied cookies from a signed-in browser session.
+        """
         if self._streams is None:
+            if self.is_age_restricted:
+                # Check whether the client attached to this video has any
+                # auth configured. If not, raise now with a clear message
+                # rather than letting the legacy bypass_age_gate() fail
+                # after several extra network round-trips.
+                client = self._client
+                has_auth = client is not None and (
+                    getattr(client, "_cookies_path", None)
+                    or getattr(client, "_cookies_browser", None)
+                    or getattr(client, "_use_oauth", False)
+                )
+                if not has_auth:
+                    raise AgeRestricted(self.video_id, url=self.url)
+
             logger.debug("video.streams: hydrating stream catalog for %s", self.video_id)
             try:
                 fmt_streams = self._legacy.fmt_streams
@@ -210,6 +261,88 @@ class Video:
             container=container,
             timeout=timeout,
         )
+
+    # ── live stream capture ─────────────────────────────────────────────────
+
+    def record_live(
+        self,
+        output_path: Union[str, Path, None] = None,
+        *,
+        filename: Optional[str] = None,
+        timeout: Optional[int] = None,
+    ) -> Path:
+        """Record an active live stream by consuming its HLS manifest.
+
+        Uses ``ffmpeg -i <hls_url> -c copy`` to capture the stream in
+        real time. The call **blocks** until the broadcast ends or the
+        process is interrupted (Ctrl-C / SIGINT is propagated cleanly).
+
+        :param output_path: directory or full path for the output file.
+            Defaults to the current working directory.
+        :param filename: override the output filename. Defaults to the
+            video title with a ``.ts`` extension (TS is the natural
+            container for HLS streams).
+        :param timeout: maximum seconds to record; ``None`` means record
+            until the stream ends.
+        :returns: :class:`Path` of the recorded file.
+        :raises LiveStreamNotSupported: if the video is not currently live.
+        :raises RuntimeError: if ffmpeg is not on PATH.
+        """
+        if not self.is_live:
+            if self.is_live_content:
+                raise LiveStreamNotSupported(
+                    self.video_id, url=self.url,
+                )
+            raise LiveStreamNotSupported(self.video_id, url=self.url)
+
+        hls_url = self.hls_manifest_url
+        if not hls_url:
+            raise LiveStreamNotSupported(
+                self.video_id, url=self.url,
+            )
+
+        ffmpeg = shutil.which("ffmpeg")
+        if not ffmpeg:
+            raise RuntimeError(
+                "ffmpeg not found on PATH — required to record live streams. "
+                "Install with `pyt --doctor --install ffmpeg`."
+            )
+
+        safe_title = "".join(
+            c if c.isalnum() or c in " ._-" else "_"
+            for c in (self.title or self.video_id)
+        ).strip() or self.video_id
+        out_filename = filename or f"{safe_title}.ts"
+
+        if output_path is None:
+            dest = Path.cwd() / out_filename
+        else:
+            p = Path(output_path)
+            dest = (p / out_filename) if p.is_dir() else p
+
+        cmd = [
+            ffmpeg, "-y",
+            "-i", hls_url,
+            "-c", "copy",
+        ]
+        if timeout is not None:
+            cmd += ["-t", str(timeout)]
+        cmd.append(str(dest))
+
+        logger.info(
+            "Video.record_live: recording %s -> %s (timeout=%s)",
+            self.video_id, dest, timeout,
+        )
+        try:
+            subprocess.run(cmd, check=True)  # nosec — argv fully constructed
+        except subprocess.CalledProcessError as exc:
+            raise PostProcessError(
+                f"ffmpeg exited {exc.returncode} while recording live stream",
+                step="record_live",
+                partial_output_path=str(dest),
+                cause=exc,
+            ) from exc
+        return dest
 
     # ── escape hatch ────────────────────────────────────────────────────────
 
@@ -269,6 +402,41 @@ def _hydrate_meta(yt: _LegacyYouTube, *, url: str) -> VideoMeta:
     except Exception:
         pass
 
+    # age_restricted is detected from watch_html, already cached by the
+    # legacy layer as a side-effect of fetching vid_info.
+    try:
+        is_age_restricted = bool(yt.age_restricted)
+    except Exception:  # noqa: BLE001 — never let logging/detection crash hydration
+        is_age_restricted = False
+
+    # isLive  = broadcast is happening right now
+    # isLiveContent = video was ever a live stream (includes ended recordings)
+    is_live = bool(details.get("isLive"))
+    is_live_content = bool(details.get("isLiveContent"))
+    is_upcoming = bool(details.get("isUpcoming"))
+
+    hls_manifest_url: Optional[str] = None
+    scheduled_start: Optional[datetime] = None
+
+    streaming_data = yt.vid_info.get("streamingData") or {}
+    if is_live:
+        hls_manifest_url = streaming_data.get("hlsManifestUrl") or None
+
+    if is_upcoming:
+        playability = yt.vid_info.get("playabilityStatus") or {}
+        offline_slate = playability.get("offlineSlate") or {}
+        ts_str = offline_slate.get("scheduledStartTime")
+        if ts_str:
+            try:
+                scheduled_start = datetime.fromtimestamp(int(ts_str), tz=timezone.utc)
+            except (TypeError, ValueError):
+                pass
+        raise LiveStreamUpcoming(
+            video_id=yt.video_id,
+            url=url,
+            scheduled_start=scheduled_start,
+        )
+
     return VideoMeta(
         video_id=yt.video_id,
         url=url,
@@ -281,5 +449,8 @@ def _hydrate_meta(yt: _LegacyYouTube, *, url: str) -> VideoMeta:
         rating=float(rating) if rating is not None else None,
         keywords=list(details.get("keywords", []) or []),
         thumbnails=thumbnails,
-        is_live=bool(details.get("isLive") or details.get("isLiveContent")),
+        is_live=is_live,
+        is_live_content=is_live_content,
+        hls_manifest_url=hls_manifest_url,
+        is_age_restricted=is_age_restricted,
     )

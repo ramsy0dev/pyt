@@ -72,20 +72,27 @@ work up-front and returns a fully-hydrated `Video` whose attributes
 are pure getters on a typed dataclass.
 
 ```python
-video.metadata        # VideoMeta dataclass (frozen)
-video.video_id        # str
-video.url             # str
-video.title           # str
-video.author          # Channel(id=, name=, url=)
-video.length          # datetime.timedelta
-video.description     # Optional[str]
-video.published_at    # Optional[datetime]
-video.views           # Optional[int]
-video.thumbnails      # list[Thumbnail(url=, width=, height=)]
-video.is_live         # bool
+video.metadata           # VideoMeta dataclass (frozen)
+video.video_id           # str
+video.url                # str
+video.title              # str
+video.author             # Channel(id=, name=, url=)
+video.length             # datetime.timedelta
+video.description        # Optional[str]
+video.published_at       # Optional[datetime]
+video.views              # Optional[int]
+video.thumbnails         # list[Thumbnail(url=, width=, height=)]
 
-video.legacy          # the underlying pyt.YouTube — escape hatch
-                      # for anything not yet on the modern surface
+# Live stream state
+video.is_live            # bool — True only while actively broadcasting
+video.is_live_content    # bool — True for VODs that were once live streams
+video.hls_manifest_url   # Optional[str] — HLS URL when is_live is True
+
+# Age gate
+video.is_age_restricted  # bool — True when age verification is required
+
+video.legacy             # the underlying pyt.YouTube — escape hatch
+                         # for anything not yet on the modern surface
 ```
 
 ## StreamSet
@@ -183,6 +190,68 @@ for video in results.videos:
     print(video.title, video.url)
 ```
 
+## Live streams
+
+Three distinct live-stream states are handled differently:
+
+| State | `is_live` | `is_live_content` | What to do |
+|---|---|---|---|
+| Actively broadcasting | `True` | `True` | use `video.record_live()` |
+| Past live / VOD | `False` | `True` | download normally — fully supported |
+| Scheduled / upcoming | n/a | n/a | `LiveStreamUpcoming` raised at `client.video()` time |
+
+### Recording an active stream
+
+```python
+from pyt import Client
+
+video = Client().video("https://www.youtube.com/watch?v=<live_id>")
+
+if video.is_live:
+    # Blocks until the broadcast ends (or timeout seconds elapse).
+    # Requires ffmpeg on PATH — install with `pyt --doctor --install ffmpeg`.
+    path = video.record_live("recordings/", timeout=3600)
+```
+
+`record_live(output_path, *, filename, timeout)` captures the HLS
+manifest with `ffmpeg -i <hls_url> -c copy`. The call blocks in real
+time. Ctrl-C is propagated cleanly. Output is a `.ts` file (the natural
+container for HLS streams).
+
+### Scheduled streams
+
+`client.video()` raises `LiveStreamUpcoming` for streams that haven't
+started yet. The exception carries `scheduled_start: Optional[datetime]`
+when YouTube includes a start time:
+
+```python
+from pyt.api.errors import LiveStreamUpcoming
+
+try:
+    video = client.video(url)
+except LiveStreamUpcoming as exc:
+    if exc.scheduled_start:
+        print(f"Stream starts at {exc.scheduled_start.isoformat()}")
+```
+
+## Age-restricted videos
+
+`video.is_age_restricted` is `True` when YouTube requires age
+verification. Accessing `.streams` without auth configured raises
+`AgeRestricted` immediately (before any wasted network calls):
+
+```python
+video = Client().video(url)   # succeeds — metadata is fetched
+
+if video.is_age_restricted:
+    # Rebuild the client with cookies from a signed-in browser.
+    video = Client(cookies_from_browser="chrome").video(url)
+
+video.streams.audio.best().download_to("downloads/").run()
+```
+
+See [cookies-auth.md](cookies-auth.md) for how to export cookies.
+
 ## Errors
 
 All modern errors inherit from `pyt.PytError`:
@@ -190,9 +259,11 @@ All modern errors inherit from `pyt.PytError`:
 | Exception | When raised |
 |---|---|
 | `VideoUnavailable` | private, removed, region-blocked, members-only |
-| `AgeRestricted` | tier-3 age gate (needs OAuth) |
-| `LiveStreamNotSupported` | URL is a live stream |
+| `AgeRestricted` | age-gated; needs cookies from a signed-in browser (**not** a subclass of `VideoUnavailable` — the video exists) |
+| `LiveStreamNotSupported` | `.streams` accessed on an active live stream; use `record_live()` instead |
+| `LiveStreamUpcoming` | `client.video()` called on a not-yet-started scheduled stream; carries `scheduled_start` |
 | `NoMatchingStream` | `.best()` / `.one()` saw an empty filter chain |
+| `AttestationRequired` | SABR returned `ATTESTATION_REQUIRED`; configure a PO token |
 | `DownloadError` | byte transfer failed (network, 403, SABR exhaustion) |
 | `PostProcessError` | a pipeline step failed; carries `step=`, `partial_output_path=`, `cause=` |
 | `ConfigError` | invalid `Client(...)` argument |

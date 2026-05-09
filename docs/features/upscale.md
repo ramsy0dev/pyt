@@ -43,15 +43,23 @@ path = (
 ## Real-ESRGAN (opt-in)
 
 Neural-net super-resolution that recovers detail (within reason).
-Install the binary first:
+Install the binary **and models** with a single command:
 
 ```bash
 pyt --doctor --install realesrgan
 ```
 
+This downloads the `xinntao/Real-ESRGAN` release bundle, which packages
+the `realesrgan-ncnn-vulkan` binary together with the model files
+(`realesrgan-x4plus.bin/.param`, etc.) in one zip. After install the
+models live at `~/.pyt/bin/models/` and pyt passes `-m ~/.pyt/bin/models`
+to the binary automatically, so inference works regardless of the
+current working directory.
+
 Or download manually from
 [xinntao/Real-ESRGAN releases](https://github.com/xinntao/Real-ESRGAN/releases)
-and put it on `PATH`.
+and put the binary **and** its `models/` directory on `PATH` / in the
+same directory.
 
 ```python
 path = (

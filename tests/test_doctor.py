@@ -161,15 +161,17 @@ def test_plan_realesrgan_windows():
     with mock.patch("pyt.api.doctor._platform_key", return_value=("windows", "x86_64")):
         plan = doctor._plan_realesrgan()
     assert plan.tool == "realesrgan"
-    assert plan.url.startswith("https://github.com/xinntao/Real-ESRGAN/releases/download/")
+    # Must come from the Python project release — that bundle includes models.
+    assert "xinntao/Real-ESRGAN/releases/download/" in plan.url
     assert plan.url.endswith("-windows.zip")
     assert plan.binary_name == "realesrgan-ncnn-vulkan.exe"
-    assert "models" in plan.extra_files
+    assert plan.copy_archive_dir is True
 
 
 def test_plan_realesrgan_linux():
     with mock.patch("pyt.api.doctor._platform_key", return_value=("linux", "x86_64")):
         plan = doctor._plan_realesrgan()
+    assert "xinntao/Real-ESRGAN/releases/download/" in plan.url
     assert plan.url.endswith("-ubuntu.zip")
     assert plan.binary_name == "realesrgan-ncnn-vulkan"
 
@@ -177,6 +179,7 @@ def test_plan_realesrgan_linux():
 def test_plan_realesrgan_macos():
     with mock.patch("pyt.api.doctor._platform_key", return_value=("darwin", "arm64")):
         plan = doctor._plan_realesrgan()
+    assert "xinntao/Real-ESRGAN/releases/download/" in plan.url
     assert plan.url.endswith("-macos.zip")
     assert plan.binary_name == "realesrgan-ncnn-vulkan"
 
@@ -226,11 +229,13 @@ def test_plan_install_unknown_tool():
 
 
 def _make_realesrgan_zip(target_zip: Path, binary_name: str) -> None:
-    """Build a fake Real-ESRGAN-shaped zip in-memory: a top-level dir
-    containing the binary + a models/ subdir."""
+    """Build a fake Real-ESRGAN-shaped zip mirroring the real bundle layout:
+    a top-level dir with the binary, companion DLLs, and a models/ subdir."""
     target_zip.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(target_zip, "w") as zf:
         zf.writestr(f"realesrgan-ncnn-vulkan/{binary_name}", b"\x7fELF" + b"\x00" * 40)
+        zf.writestr("realesrgan-ncnn-vulkan/vcomp140.dll", b"\x4d\x5a" + b"\x00" * 10)
+        zf.writestr("realesrgan-ncnn-vulkan/vcomp140d.dll", b"\x4d\x5a" + b"\x00" * 10)
         zf.writestr("realesrgan-ncnn-vulkan/models/realesrgan-x4plus.bin", b"weights")
         zf.writestr("realesrgan-ncnn-vulkan/models/realesrgan-x4plus.param", b"params")
 
@@ -244,8 +249,6 @@ def test_install_realesrgan_full_pipeline(tmp_path, monkeypatch):
     binary_name = "realesrgan-ncnn-vulkan.exe"
 
     def fake_download(url, target, *, on_progress=None):
-        # Pretend we downloaded the archive: write a real zip with the
-        # expected structure so _extract / _find_in_tree work.
         _make_realesrgan_zip(target, binary_name)
         if on_progress:
             on_progress(100, 100)
@@ -256,7 +259,7 @@ def test_install_realesrgan_full_pipeline(tmp_path, monkeypatch):
         archive_format="zip",
         target_dir=fake_pyt_bin,
         binary_name=binary_name,
-        extra_files=["models"],
+        copy_archive_dir=True,
     )
 
     with mock.patch("pyt.api.doctor.plan_install", return_value=plan), \
@@ -266,9 +269,12 @@ def test_install_realesrgan_full_pipeline(tmp_path, monkeypatch):
 
     assert result == fake_pyt_bin / binary_name
     assert result.exists()
-    # The models/ extras should have been copied alongside the binary.
-    assert (fake_pyt_bin / "models").is_dir()
+    # Companion DLLs must land next to the binary.
+    assert (fake_pyt_bin / "vcomp140.dll").is_file()
+    assert (fake_pyt_bin / "vcomp140d.dll").is_file()
+    # Model files must land in models/ so the binary can find them.
     assert (fake_pyt_bin / "models" / "realesrgan-x4plus.bin").is_file()
+    assert (fake_pyt_bin / "models" / "realesrgan-x4plus.param").is_file()
 
 
 def test_install_raises_when_binary_missing_from_archive(tmp_path, monkeypatch):

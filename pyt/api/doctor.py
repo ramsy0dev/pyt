@@ -307,6 +307,9 @@ class InstallPlan:
     target_dir: Path
     binary_name: str       # what ends up on PATH
     extra_files: List[str] = field(default_factory=list)
+    # When True, copy all sibling files from the binary's archive directory
+    # (e.g. DLLs that must live next to the exe on Windows).
+    copy_archive_dir: bool = False
 
 
 def plan_install(tool_name: str) -> InstallPlan:
@@ -365,6 +368,16 @@ def install(
         plan.target_dir.mkdir(parents=True, exist_ok=True)
         shutil.copy2(binary, target)
         _make_executable(target)
+
+        if plan.copy_archive_dir:
+            # Copy every sibling file from the binary's archive directory so
+            # that DLLs (Windows) and other required companions land next to
+            # the binary in target_dir.
+            for sibling in binary.parent.iterdir():
+                if sibling.is_file() and sibling.name != plan.binary_name:
+                    shutil.copy2(sibling, plan.target_dir / sibling.name)
+                elif sibling.is_dir():
+                    _copy_directory_named(binary.parent, sibling.name, plan.target_dir)
 
         for extra in plan.extra_files:
             extra_src = _find_in_tree(workdir / "extracted", extra)
@@ -678,23 +691,29 @@ def _verify_po_token_install(wrapper_path: Path) -> bool:
 # ── per-tool plans ────────────────────────────────────────────────────────
 
 
-_REALESRGAN_VERSION = "0.2.5.0"
+# The xinntao/Real-ESRGAN Python project releases bundle the ncnn binary
+# AND the model files together; the xinntao/Real-ESRGAN-ncnn-vulkan repo's
+# own releases ship the binary only (no models). We use the former so one
+# doctor install gives a fully working setup. The zip filename uses a date
+# (YYYYMMDD), not the version tag.
+_REALESRGAN_RELEASE_TAG = "v0.2.5.0"
+_REALESRGAN_RELEASE_DATE = "20220424"
 _REALESRGAN_BASE_URL = (
     f"https://github.com/xinntao/Real-ESRGAN/releases/download/"
-    f"v{_REALESRGAN_VERSION}"
+    f"{_REALESRGAN_RELEASE_TAG}"
 )
 
 
 def _plan_realesrgan() -> InstallPlan:
     sysname, arch = _platform_key()
     if sysname == "windows":
-        zip_name = f"realesrgan-ncnn-vulkan-{_REALESRGAN_VERSION.replace('.', '')[:8]}-windows.zip"
+        zip_name = f"realesrgan-ncnn-vulkan-{_REALESRGAN_RELEASE_DATE}-windows.zip"
         binary = "realesrgan-ncnn-vulkan.exe"
     elif sysname == "darwin":
-        zip_name = f"realesrgan-ncnn-vulkan-{_REALESRGAN_VERSION.replace('.', '')[:8]}-macos.zip"
+        zip_name = f"realesrgan-ncnn-vulkan-{_REALESRGAN_RELEASE_DATE}-macos.zip"
         binary = "realesrgan-ncnn-vulkan"
     elif sysname == "linux":
-        zip_name = f"realesrgan-ncnn-vulkan-{_REALESRGAN_VERSION.replace('.', '')[:8]}-ubuntu.zip"
+        zip_name = f"realesrgan-ncnn-vulkan-{_REALESRGAN_RELEASE_DATE}-ubuntu.zip"
         binary = "realesrgan-ncnn-vulkan"
     else:
         raise InstallError(
@@ -706,8 +725,9 @@ def _plan_realesrgan() -> InstallPlan:
         archive_format="zip",
         target_dir=pyt_bin_dir(),
         binary_name=binary,
-        # The model files live in models/; the binary needs them as siblings.
-        extra_files=["models"],
+        # Copies DLLs (Windows) and the models/ dir that ships alongside the
+        # binary in this release bundle.
+        copy_archive_dir=True,
     )
 
 

@@ -515,6 +515,13 @@ def _upscale_frames_realesrgan(
         "-s", str(scale),
         "-f", "png",
     ]
+    # The binary's default model path is "models/" relative to CWD, which
+    # breaks when pyt is invoked from an arbitrary directory. Pass -m
+    # pointing to the models/ dir that ships alongside the binary so it
+    # always resolves correctly.
+    models_dir = Path(binary).parent / "models"
+    if models_dir.is_dir():
+        cmd += ["-m", str(models_dir)]
     if tile_size:
         cmd += ["-t", str(tile_size)]
     if threads:

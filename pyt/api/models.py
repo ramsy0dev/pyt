@@ -50,3 +50,7 @@ class VideoMeta:
     keywords: List[str] = field(default_factory=list)
     thumbnails: List[Thumbnail] = field(default_factory=list)
     is_live: bool = False
+    is_live_content: bool = False
+    hls_manifest_url: Optional[str] = None
+    scheduled_start: Optional[datetime] = None
+    is_age_restricted: bool = False

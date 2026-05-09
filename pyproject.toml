@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "pyt"
-version = "2.0.0"
+version = "2.1.0"
 description = "A maintained pytube fork for downloading YouTube videos."
 authors = ["ramsy0dev <ramsy0dev@gmail.com>"]
 readme = "README.md"

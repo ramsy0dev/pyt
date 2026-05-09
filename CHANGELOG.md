@@ -1,5 +1,83 @@
 # Changelog
 
+## 2.1.0 — 2026-05-09
+
+### Fixed
+
+#### Doctor — realesrgan binary download
+
+- **Wrong repo and filename.** The previous code fetched from
+  `xinntao/Real-ESRGAN-ncnn-vulkan` (binary-only repo) using a
+  version-derived filename that never existed. The download now targets
+  `xinntao/Real-ESRGAN` v0.2.5.0, whose release bundle ships the binary
+  **and** model files together in
+  `realesrgan-ncnn-vulkan-20220424-{platform}.zip`.
+- **Models were missing.** After install the upscaler would fail at
+  runtime because `realesrgan-ncnn-vulkan` couldn't find its `.bin`/
+  `.param` model files. The install now copies the bundled `models/`
+  directory to `~/.pyt/bin/models/` via `copy_archive_dir=True`.
+- **`-m` flag not passed.** `upscale.py` invoked the binary without
+  `-m`, so it looked for `models/` relative to the current working
+  directory — wrong for any invocation not from `~/.pyt/bin/`. pyt now
+  detects a `models/` directory next to the binary and passes
+  `-m <path>` automatically.
+
+#### Live stream handling
+
+Previously all three live-stream states were conflated into a single
+`LiveStreamNotSupported` error thrown at stream-fetch time with no
+recovery path.
+
+- **Active live streams** (`isLive=true`) — `VideoMeta` now carries
+  `is_live: bool`, `hls_manifest_url: Optional[str]`. The new
+  `Video.record_live(output_path, *, filename, timeout)` method captures
+  the broadcast via `ffmpeg -i <hls_url> -c copy`, blocking until the
+  stream ends or `timeout` seconds elapse.
+- **Past live recordings / VODs** (`isLiveContent=true, isLive=false`)
+  — previously mislabelled as live. `is_live` is now set only from
+  `isLive`, not `isLiveContent`. VODs are fully downloadable via the
+  normal stream path.
+- **Scheduled / upcoming streams** (`isUpcoming=true`) — previously
+  surfaced as a confusing generic error. `client.video()` now raises
+  `LiveStreamUpcoming` immediately. The exception carries
+  `scheduled_start: Optional[datetime]` (UTC) when YouTube includes a
+  start time in the response.
+- `VideoMeta` gains `is_live_content: bool`, `hls_manifest_url:
+  Optional[str]`, and `scheduled_start: Optional[datetime]`.
+- `Video` gains `is_live_content`, `hls_manifest_url`, and
+  `record_live()`.
+
+#### Age-restricted videos
+
+- **Wrong error hierarchy.** `AgeRestricted` was a subclass of
+  `VideoUnavailable`, but an age-gated video is accessible — it just
+  requires authentication. `AgeRestricted` is now a direct `PytError`
+  subclass.
+- **Useless error message.** The exception now explains the fix inline:
+  `Client(cookies_from_browser="chrome")` or
+  `Client(cookies="path/to/cookies.txt")`.
+- **No early detection.** `VideoMeta` gains `is_age_restricted: bool`
+  (populated at hydration time from the legacy layer's cached
+  `watch_html` check — no extra network call). `Video.is_age_restricted`
+  exposes it.
+- **Wasted network round-trips.** Accessing `Video.streams` on an
+  age-restricted video without auth configured now raises `AgeRestricted`
+  immediately, before the legacy `bypass_age_gate()` loop fires several
+  extra HTTP requests that would all fail anyway.
+
+### Changed
+
+- `AgeRestricted` no longer inherits `VideoUnavailable`. Code catching
+  `VideoUnavailable` to handle "completely inaccessible" videos is not
+  affected; code catching `VideoUnavailable` specifically to handle
+  age-restricted content should be updated to catch `AgeRestricted`.
+
+### Test counts
+
+2.0.0 shipped **633** tests; 2.1.0 ships **640**, all passing.
+
+---
+
 ## 2.0.0 — 2026-05-08
 
 The "modern API" release. Adds a redesigned Python interface
