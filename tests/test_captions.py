@@ -8,11 +8,9 @@ from unittest.mock import (
 )
 
 import pytest
-from pyt import (
-    Caption,
-    CaptionQuery,
-    captions
-)
+from pyt import captions
+from pyt.captions import Caption
+from pyt.query import CaptionQuery
 
 def test_float_to_srt_time_format():
     caption1 = Caption(

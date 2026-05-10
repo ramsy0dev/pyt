@@ -3,7 +3,7 @@ import pytest
 from unittest import mock
 
 import pyt
-from pyt import YouTube
+from pyt.legacy import YouTube
 from pyt.exceptions import RegexMatchError
 
 @mock.patch("urllib.request.install_opener")

@@ -152,18 +152,15 @@ class SearchResults:
     @property
     def videos(self) -> List["Video"]:
         """First page of video results, materialized as :class:`Video`."""
-        from pyt.api.video import Video, _hydrate_meta
-
         out: List["Video"] = []
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", DeprecationWarning)
             raw = list(self._legacy.results or [])
         for legacy_yt in raw:
             try:
-                meta = _hydrate_meta(legacy_yt, url=legacy_yt.watch_url)
+                out.append(self._client.video(legacy_yt.watch_url))
             except Exception:
                 continue
-            out.append(Video(legacy_yt, meta=meta))
         return out
 
     @property

@@ -1,6 +1,6 @@
 from unittest import mock
 
-from pyt import Channel
+from pyt.contrib.channel import Channel
 
 
 @mock.patch('pyt.request.get')

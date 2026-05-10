@@ -388,7 +388,7 @@ def create_mock_html_json(vid_id) -> Dict[str, Any]:
         Dict used to generate the json.gz file
     """
     import warnings
-    from pyt import YouTube
+    from pyt.__main__ import YouTube
     gzip_filename = 'yt-video-%s-html.json.gz' % vid_id
 
     # Get the pyt directory in order to navigate to /tests/mocks

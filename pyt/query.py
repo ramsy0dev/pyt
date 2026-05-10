@@ -11,10 +11,8 @@ from collections.abc import (
     Sequence
 )
 
-from pyt import (
-    Caption,
-    Stream
-)
+from pyt.captions import Caption
+from pyt.streams import Stream
 from pyt.helpers import deprecated
 
 class StreamQuery(Sequence):

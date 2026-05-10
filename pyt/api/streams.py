@@ -11,12 +11,12 @@ import re
 from typing import TYPE_CHECKING, Callable, Iterator, List, Optional, Sequence, Tuple
 
 from pyt.api.errors import NoMatchingStream
+from pyt.api._streams_hydrator import _RawStream
 
 
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from pyt.streams import Stream as _LegacyStream
     from pyt.api.download import Download
     from pyt.api.video import Video
 
@@ -58,41 +58,45 @@ def _parse_threshold(value) -> Optional[int]:
 class StreamRef:
     """A single stream selected from a :class:`StreamSet`.
 
-    This is the object you call :meth:`download_to` on. It is a thin
-    wrapper around :class:`pyt.Stream` — everything not redefined here
-    is forwarded via :attr:`legacy`.
+    This is the object you call :meth:`download_to` on. It wraps a
+    :class:`_RawStream` — a pre-parsed, frozen dataclass produced by
+    :func:`pyt.api._streams_hydrator.hydrate_streams`.
     """
 
-    def __init__(self, legacy: "_LegacyStream", *, video: "Video"):
-        self._legacy = legacy
+    def __init__(self, raw: _RawStream, *, video: "Video"):
+        self._raw = raw
         self._video = video
 
     # ── identity ────────────────────────────────────────────────────────────
 
     @property
     def itag(self) -> int:
-        return int(self._legacy.itag)
+        return self._raw.itag
+
+    @property
+    def url(self) -> str:
+        return self._raw.url
 
     @property
     def mime_type(self) -> str:
-        return self._legacy.mime_type
+        return self._raw.mime_type
 
     @property
     def kind(self) -> str:
         """``"audio"`` or ``"video"`` (per the MIME top-level type)."""
-        return self._legacy.type
+        return self._raw.kind
 
     @property
     def subtype(self) -> str:
-        return self._legacy.subtype
+        return self._raw.subtype
 
     @property
     def is_progressive(self) -> bool:
-        return bool(self._legacy.is_progressive)
+        return self._raw.is_progressive
 
     @property
     def is_adaptive(self) -> bool:
-        return bool(self._legacy.is_adaptive)
+        return self._raw.is_adaptive
 
     @property
     def is_audio_only(self) -> bool:
@@ -104,39 +108,43 @@ class StreamRef:
 
     @property
     def resolution(self) -> Optional[str]:
-        return getattr(self._legacy, "resolution", None)
+        return self._raw.resolution
 
     @property
     def fps(self) -> Optional[int]:
-        return getattr(self._legacy, "fps", None)
+        return self._raw.fps
 
     @property
     def abr(self) -> Optional[str]:
-        return getattr(self._legacy, "abr", None)
+        return self._raw.abr
 
     @property
     def bitrate(self) -> Optional[int]:
-        return getattr(self._legacy, "bitrate", None)
+        return self._raw.bitrate
 
     @property
     def video_codec(self) -> Optional[str]:
-        return getattr(self._legacy, "video_codec", None)
+        return self._raw.video_codec
 
     @property
     def audio_codec(self) -> Optional[str]:
-        return getattr(self._legacy, "audio_codec", None)
+        return self._raw.audio_codec
 
     @property
     def filesize(self) -> int:
-        return int(getattr(self._legacy, "filesize", 0) or 0)
+        return self._raw.filesize
+
+    @property
+    def filesize_approx(self) -> int:
+        return self._raw.filesize_approx
+
+    @property
+    def default_filename(self) -> str:
+        return self._raw.default_filename
 
     @property
     def video(self) -> "Video":
         return self._video
-
-    @property
-    def legacy(self) -> "_LegacyStream":
-        return self._legacy
 
     # ── action ──────────────────────────────────────────────────────────────
 
@@ -187,8 +195,8 @@ class StreamSet(Sequence[StreamRef]):
         self._video = video
 
     @classmethod
-    def _from_legacy(cls, fmt_streams: List["_LegacyStream"], *, video: "Video") -> "StreamSet":
-        refs = tuple(StreamRef(s, video=video) for s in fmt_streams)
+    def _from_raw(cls, raw_streams: List[_RawStream], *, video: "Video") -> "StreamSet":
+        refs = tuple(StreamRef(s, video=video) for s in raw_streams)
         return cls(refs, video=video)
 
     # ── Sequence protocol ───────────────────────────────────────────────────

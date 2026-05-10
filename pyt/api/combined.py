@@ -23,7 +23,6 @@ import logging
 import os
 import socket
 import tempfile
-import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
@@ -154,7 +153,8 @@ class CombinedDownload:
             else:
                 final_filename = self._filename
         else:
-            stem = os.path.splitext(self._video_stream.legacy.default_filename)[0]
+            from pyt.helpers import safe_filename as _sf
+            stem = _sf(self._video.title or self._video.video_id)
             final_filename = f"{stem}.{container}"
         final_path = target_dir / final_filename
 
@@ -252,23 +252,20 @@ class CombinedDownload:
             (self._audio_stream, "audio"),
         ):
             path = target_dir / f"{base_stem}.{role}.{stream.subtype}.part"
-            # Truncate any previous attempt — multi-format SABR resume is
-            # not yet wired up. (See ``_ResumeState`` in pyt.sabr.session;
-            # plumbing it across runs is a follow-up.)
             fh = open(path, "wb")
-            expected = stream.filesize or stream.legacy.filesize_approx or 0
+            expected = stream.filesize or stream.filesize_approx or 0
             out.append(_PartFile(
                 itag=stream.itag,
                 path=path,
                 fh=fh,
                 expected=int(expected) if expected else 0,
-                direct_url=stream.legacy.url,
+                direct_url=stream.url,
             ))
         return out
 
     def _drive_sabr_session(self, parts: List[_PartFile]) -> None:
-        monostate = self._video.legacy.stream_monostate
-        sabr_url = monostate.sabr_url
+        sabr_cfg = self._video._sabr_config
+        sabr_url = sabr_cfg.sabr_url if sabr_cfg else None
         if not sabr_url:
             # Pre-SABR account/video — nothing to multiplex. Fall through to
             # the byte-range path which the fallback method already handles.
@@ -284,23 +281,20 @@ class CombinedDownload:
             sabr_url, self._video_stream.itag, self._audio_stream.itag,
         )
 
-        with warnings.catch_warnings():
-            # SabrSession indirectly imports legacy paths; suppress noise.
-            warnings.simplefilter("ignore", DeprecationWarning)
-            session = SabrSession(
-                sabr_url=sabr_url,
-                ustreamer_config=monostate.ustreamer_config,
-                formats=[
-                    (self._video_stream.itag, True),
-                    (self._audio_stream.itag, False),
-                ],
-                po_token=_decode_po_token(monostate.po_token),
-                client_info=monostate.client_info,
-                duration_ms=int((monostate.duration or 0) * 1000),
-                expected_sizes={p.itag: p.expected for p in parts if p.expected},
-                timeout=self._timeout if self._timeout is not None else socket._GLOBAL_DEFAULT_TIMEOUT,
-                refresh_callback=monostate.refresh_sabr_config,
-            )
+        session = SabrSession(
+            sabr_url=sabr_url,
+            ustreamer_config=sabr_cfg.ustreamer_config if sabr_cfg else None,
+            formats=[
+                (self._video_stream.itag, True),
+                (self._audio_stream.itag, False),
+            ],
+            po_token=_decode_po_token(sabr_cfg.po_token if sabr_cfg else None),
+            client_info=sabr_cfg.client_info if sabr_cfg else {},
+            duration_ms=int((sabr_cfg.duration or 0) * 1000) if sabr_cfg else 0,
+            expected_sizes={p.itag: p.expected for p in parts if p.expected},
+            timeout=self._timeout if self._timeout is not None else socket._GLOBAL_DEFAULT_TIMEOUT,
+            refresh_callback=sabr_cfg.refresh_sabr_config if sabr_cfg else None,
+        )
 
         by_itag: Dict[int, _PartFile] = {p.itag: p for p in parts}
         try:
@@ -363,28 +357,23 @@ class CombinedDownload:
                 ) from exc
 
     def _range_finish(self, p: _PartFile) -> None:
-        stream_for_progress = (
-            self._video_stream
-            if p.itag == self._video_stream.itag
-            else self._audio_stream
-        )
-        monostate = self._video.legacy.stream_monostate
+        sabr_cfg = self._video._sabr_config
+        extra_headers = (sabr_cfg.stream_headers or {}) if sabr_cfg else {}
         for chunk in request.stream(
             p.direct_url,
             timeout=self._timeout,
             max_retries=0,
             start_byte=p.written,
-            extra_headers=monostate.stream_headers or None,
+            extra_headers=extra_headers or None,
         ):
             p.fh.write(chunk)
             p.written += len(chunk)
             self._fire_progress(p.itag, chunk, p)
 
     def _try_refresh_po_token(self) -> bool:
-        """Ask the parent :class:`Client` for a fresh PO token and write
-        it back to the legacy monostate so the next SABR session picks
-        it up. Returns ``True`` on success, ``False`` if no provider is
-        configured or the provider failed.
+        """Ask the parent :class:`Client` for a fresh PO token and update
+        the _SabrConfig so the next SABR session picks it up.
+        Returns ``True`` on success, ``False`` if no provider is configured.
         """
         client = getattr(self._video, "_client", None)
         if client is None or not getattr(client, "has_po_token_provider", False):
@@ -396,13 +385,13 @@ class CombinedDownload:
         try:
             new_token = client.refresh_po_token()
         except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "CombinedDownload: po_token refresh failed: %s", exc,
-            )
+            logger.warning("CombinedDownload: po_token refresh failed: %s", exc)
             return False
         if not new_token:
             return False
-        self._video.legacy.stream_monostate.po_token = new_token
+        sabr_cfg = self._video._sabr_config
+        if sabr_cfg is not None:
+            sabr_cfg.po_token = new_token
         logger.info(
             "CombinedDownload: refreshed po_token (%d chars) for video_id=%s",
             len(new_token), self._video.video_id,
@@ -410,18 +399,16 @@ class CombinedDownload:
         return True
 
     def _fire_progress(self, itag: int, chunk: bytes, p: _PartFile) -> None:
-        """Forward to the legacy on_progress callback (still wired through
-        Monostate), preserving the `(stream, chunk, bytes_remaining)` shape.
-        """
-        callback = self._video.legacy.stream_monostate.on_progress
+        sabr_cfg = self._video._sabr_config
+        callback = sabr_cfg.on_progress if sabr_cfg else None
         if callback is None:
             return
-        legacy_stream = (
-            self._video_stream.legacy
+        stream = (
+            self._video_stream
             if itag == self._video_stream.itag
-            else self._audio_stream.legacy
+            else self._audio_stream
         )
-        callback(legacy_stream, chunk, p.remaining())
+        callback(stream, chunk, p.remaining())
 
     def __repr__(self) -> str:
         return (

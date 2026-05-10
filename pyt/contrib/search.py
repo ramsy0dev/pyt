@@ -3,7 +3,7 @@
 import logging
 import warnings
 
-from pyt import YouTube
+from pyt.__main__ import YouTube
 from pyt.innertube import InnerTube
 
 logger = logging.getLogger(__name__)

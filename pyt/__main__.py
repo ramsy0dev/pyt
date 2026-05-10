@@ -35,12 +35,9 @@ _DEPRECATION_MESSAGE = (
     "while you migrate, import the class explicitly from pyt.legacy."
 )
 
-from pyt import (
-    extract,
-    request,
-    Stream,
-    StreamQuery
-)
+from pyt import extract, request
+from pyt.streams import Stream
+from pyt.query import StreamQuery
 from pyt.helpers import install_proxy
 from pyt.innertube import InnerTube, _default_clients
 from pyt.metadata import YouTubeMetadata
@@ -448,25 +445,21 @@ class YouTube:
         raise exceptions.AgeRestrictedError(self.video_id)
 
     @property
-    def caption_tracks(self) -> List[pyt.Caption]:
-        """Get a list of :class:`Caption <Caption>`.
-
-        :rtype: List[Caption]
-        """
+    def caption_tracks(self):
+        """Get a list of :class:`Caption <Caption>`."""
+        from pyt.captions import Caption
         raw_tracks = (
             self.vid_info.get("captions", {})
             .get("playerCaptionsTracklistRenderer", {})
             .get("captionTracks", [])
         )
-        return [pyt.Caption(track) for track in raw_tracks]
+        return [Caption(track) for track in raw_tracks]
 
     @property
-    def captions(self) -> pyt.CaptionQuery:
-        """Interface to query caption tracks.
-
-        :rtype: :class:`CaptionQuery <CaptionQuery>`.
-        """
-        return pyt.CaptionQuery(self.caption_tracks)
+    def captions(self):
+        """Interface to query caption tracks."""
+        from pyt.query import CaptionQuery
+        return CaptionQuery(self.caption_tracks)
 
     @property
     def streams(self) -> StreamQuery:

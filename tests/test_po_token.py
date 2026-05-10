@@ -395,30 +395,47 @@ def test_client_refresh_invalidates_cache():
 # ── CombinedDownload auto-retry ──────────────────────────────────────────
 
 
+def _make_combined_video(cipher_signature, *, video_size=100, audio_size=100):
+    """Build a Video + two raw streams for CombinedDownload PO-token tests."""
+    from pyt.api._streams_hydrator import _RawStream
+    from pyt.api.streams import StreamSet
+    from pyt.api._sabr_config import _SabrConfig
+    from pyt.api.video import Video, _hydrate_meta
+
+    pr = cipher_signature._vid_info
+    meta = _hydrate_meta(pr, url=f"https://youtube.com/watch?v={cipher_signature.video_id}")
+    video = Video(player_response=pr, meta=meta, client_name="ANDROID_VR", client_cfg={})
+    v_raw = _RawStream(itag=136, url="https://ex.com/video", mime_type="video/mp4",
+                       kind="video", subtype="mp4", video_codec="avc1.4d401f",
+                       audio_codec=None, is_adaptive=True, is_progressive=False,
+                       is_otf=False, bitrate=1500000,
+                       filesize=video_size, filesize_approx=video_size,
+                       resolution="720p", fps=30, abr=None, default_filename="v.mp4")
+    a_raw = _RawStream(itag=140, url="https://ex.com/audio", mime_type="audio/mp4",
+                       kind="audio", subtype="mp4", video_codec=None,
+                       audio_codec="mp4a.40.2", is_adaptive=True, is_progressive=False,
+                       is_otf=False, bitrate=128000,
+                       filesize=audio_size, filesize_approx=audio_size,
+                       resolution=None, fps=None, abr="128kbps", default_filename="a.mp4")
+    video._streams = StreamSet._from_raw([v_raw, a_raw], video=video)
+    video._sabr_config = _SabrConfig()
+    return video, video._streams[0], video._streams[1]
+
+
 def test_combined_download_translates_attestation_required(cipher_signature, tmp_path):
     """SabrAttestationRequired from the inner SABR session should
     surface as the modern AttestationRequired error."""
     from pyt.api import CombinedDownload
-    from pyt.api.video import Video, _hydrate_meta
     from pyt.sabr.session import SabrAttestationRequired
 
-    meta = _hydrate_meta(cipher_signature, url=f"https://youtube.com/watch?v={cipher_signature.video_id}")
-    video = Video(cipher_signature, meta=meta)
-
-    v_stream = video.streams.video.adaptive.first()
-    a_stream = video.streams.audio.first()
-    if v_stream is None or a_stream is None:
-        pytest.skip("fixture lacks adaptive video / audio")
-    v_stream.legacy._filesize = 100
-    a_stream.legacy._filesize = 100
+    video, v_stream, a_stream = _make_combined_video(cipher_signature, video_size=100, audio_size=100)
 
     plan = CombinedDownload(
         video=video, video_stream=v_stream, audio_stream=a_stream,
         output_path=str(tmp_path), filename="out.mkv", container="mkv",
     )
-
-    video.legacy.stream_monostate.sabr_url = "https://sabr.example/play"
-    video.legacy.stream_monostate.duration = 10
+    video._sabr_config.sabr_url = "https://sabr.example/play"
+    video._sabr_config.duration = 10
 
     fake_session = mock.MagicMock()
     fake_session.iter_chunks.side_effect = SabrAttestationRequired(
@@ -434,30 +451,21 @@ def test_combined_download_retries_with_refreshed_po_token(cipher_signature, tmp
     """When a Client with a provider hits AttestationRequired, the
     PO token is refreshed and the SABR session is rebuilt once."""
     from pyt.api import CombinedDownload
-    from pyt.api.video import Video, _hydrate_meta
     from pyt.sabr.session import SabrAttestationRequired
 
-    meta = _hydrate_meta(cipher_signature, url=f"https://youtube.com/watch?v={cipher_signature.video_id}")
-    video = Video(cipher_signature, meta=meta)
+    video, v_stream, a_stream = _make_combined_video(cipher_signature, video_size=4, audio_size=4)
+
     # Stand in for a Client that has a provider.
     fake_client = mock.MagicMock()
     fake_client.has_po_token_provider = True
     fake_client.refresh_po_token.return_value = "fresh-token-after-retry"
     video._client = fake_client
 
-    v_stream = video.streams.video.adaptive.first()
-    a_stream = video.streams.audio.first()
-    if v_stream is None or a_stream is None:
-        pytest.skip("fixture lacks adaptive video / audio")
-    v_stream.legacy._filesize = 4
-    a_stream.legacy._filesize = 4
-
     plan = CombinedDownload(
         video=video, video_stream=v_stream, audio_stream=a_stream,
         output_path=str(tmp_path), filename="out.mkv", container="mkv",
     )
-
-    video.legacy.stream_monostate.sabr_url = "https://sabr.example/play"
+    video._sabr_config.sabr_url = "https://sabr.example/play"
 
     # First call raises AttestationRequired; second call delivers bytes.
     fake_session_1 = mock.MagicMock()
@@ -483,7 +491,7 @@ def test_combined_download_retries_with_refreshed_po_token(cipher_signature, tmp
         result = plan.run()
 
     fake_client.refresh_po_token.assert_called_once()
-    assert video.legacy.stream_monostate.po_token == "fresh-token-after-retry"
+    assert video._sabr_config.po_token == "fresh-token-after-retry"
     assert result == tmp_path / "out.mkv"
 
 
@@ -491,25 +499,16 @@ def test_combined_download_propagates_when_no_provider(cipher_signature, tmp_pat
     """If the parent Client has no PO token provider, AttestationRequired
     propagates without retry."""
     from pyt.api import CombinedDownload
-    from pyt.api.video import Video, _hydrate_meta
     from pyt.sabr.session import SabrAttestationRequired
 
-    meta = _hydrate_meta(cipher_signature, url=f"https://youtube.com/watch?v={cipher_signature.video_id}")
-    video = Video(cipher_signature, meta=meta)
+    video, v_stream, a_stream = _make_combined_video(cipher_signature, video_size=4, audio_size=4)
     # No _client attribute means no provider.
-
-    v_stream = video.streams.video.adaptive.first()
-    a_stream = video.streams.audio.first()
-    if v_stream is None or a_stream is None:
-        pytest.skip("fixture lacks adaptive video / audio")
-    v_stream.legacy._filesize = 4
-    a_stream.legacy._filesize = 4
 
     plan = CombinedDownload(
         video=video, video_stream=v_stream, audio_stream=a_stream,
         output_path=str(tmp_path), filename="out.mkv", container="mkv",
     )
-    video.legacy.stream_monostate.sabr_url = "https://sabr.example/play"
+    video._sabr_config.sabr_url = "https://sabr.example/play"
 
     fake_session = mock.MagicMock()
     fake_session.iter_chunks.side_effect = SabrAttestationRequired(

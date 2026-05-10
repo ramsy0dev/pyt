@@ -1,19 +1,18 @@
-"""Lazy download builder.
-
-The legacy :meth:`pyt.Stream.download` blocks, takes 6 kwargs, and fires
-its progress callback through a process-global ``Monostate``. This module
-wraps that into a :class:`Download` builder you can compose and re-run
-without mutating client state.
-"""
+"""Lazy download builder."""
 from __future__ import annotations
 
 import logging
+import os
+import socket
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, List, Optional, Union
+from urllib.error import HTTPError
 
 from pyt.api.errors import DownloadError, PostProcessError
+from pyt import request as _req
+from pyt.helpers import safe_filename, target_directory
 
 
 logger = logging.getLogger(__name__)
@@ -91,14 +90,9 @@ class Download:
         )
         t_dl_start = time.monotonic()
         try:
-            raw_path = self._stream.legacy.download(
-                output_path=self._output_path,
-                filename=self._filename,
-                filename_prefix=self._filename_prefix,
-                skip_existing=self._skip_existing,
-                timeout=self._timeout,
-                max_retries=self._max_retries,
-            )
+            raw_path = self._transfer_bytes()
+        except DownloadError:
+            raise
         except Exception as exc:
             logger.warning(
                 "Download.run: byte transfer failed for itag=%d after %.2fs: %s",
@@ -140,6 +134,138 @@ class Download:
             )
 
         return Path(path)
+
+    # ── byte transfer ────────────────────────────────────────────────────────
+
+    def _transfer_bytes(self) -> str:
+        """Write stream bytes to disk. Returns the file path string."""
+        stream = self._stream
+        sabr_cfg = getattr(stream.video, '_sabr_config', None)
+
+        # ── file path ──────────────────────────────────────────────────────
+        filename = self._filename or stream.default_filename
+        if self._filename_prefix:
+            filename = f"{self._filename_prefix}{filename}"
+        file_path = os.path.join(target_directory(self._output_path), filename)
+
+        # ── skip-existing ──────────────────────────────────────────────────
+        if self._skip_existing and os.path.isfile(file_path):
+            known = stream.filesize
+            if known and os.path.getsize(file_path) == known:
+                logger.debug("file %s already exists, skipping", file_path)
+                if sabr_cfg and sabr_cfg.on_complete:
+                    sabr_cfg.on_complete(stream, file_path)
+                return file_path
+
+        # ── transfer ───────────────────────────────────────────────────────
+        timeout = self._timeout if self._timeout is not None else socket._GLOBAL_DEFAULT_TIMEOUT
+        max_retries = self._max_retries
+        url = stream.url
+        extra_headers = (sabr_cfg.stream_headers or {}) if sabr_cfg else {}
+
+        known_filesize = stream.filesize or stream.filesize_approx or 0
+        bytes_remaining = known_filesize
+
+        with open(file_path, "wb") as fh:
+            # ── SABR path ──────────────────────────────────────────────────
+            sabr_url = sabr_cfg.sabr_url if sabr_cfg else None
+            if sabr_url:
+                try:
+                    for chunk in _req.sabr_stream(
+                        sabr_url,
+                        stream.itag,
+                        ustreamer_config=sabr_cfg.ustreamer_config if sabr_cfg else None,
+                        po_token=sabr_cfg.po_token if sabr_cfg else None,
+                        is_video=(stream.kind == 'video'),
+                        filesize=known_filesize,
+                        duration_ms=int((sabr_cfg.duration or 0) * 1000) if sabr_cfg else 0,
+                        client_info=sabr_cfg.client_info if sabr_cfg else {},
+                        refresh_callback=sabr_cfg.refresh_sabr_config if sabr_cfg else None,
+                        timeout=timeout,
+                    ):
+                        bytes_remaining = max(0, bytes_remaining - len(chunk))
+                        self._fire_progress(sabr_cfg, stream, chunk, fh, bytes_remaining)
+                except Exception as exc:
+                    logger.warning("SABR failed (%s), falling back to range download", exc)
+                    fh.seek(0)
+                    fh.truncate()
+                    bytes_remaining = known_filesize
+                else:
+                    if bytes_remaining == 0:
+                        self._fire_complete(sabr_cfg, stream, file_path)
+                        return file_path
+                    sabr_offset = known_filesize - bytes_remaining
+                    logger.warning(
+                        "SABR incomplete (%d bytes remaining); finishing with range",
+                        bytes_remaining,
+                    )
+                    try:
+                        for chunk in _req.stream(
+                            url, timeout=timeout, max_retries=max_retries,
+                            start_byte=sabr_offset,
+                            extra_headers=extra_headers or None,
+                        ):
+                            bytes_remaining -= len(chunk)
+                            self._fire_progress(sabr_cfg, stream, chunk, fh, bytes_remaining)
+                        self._fire_complete(sabr_cfg, stream, file_path)
+                        return file_path
+                    except HTTPError as e:
+                        if e.code not in (403, 404):
+                            raise
+                        fh.seek(0)
+                        fh.truncate()
+                        bytes_remaining = known_filesize
+
+            # ── byte-range / seq path ──────────────────────────────────────
+            used_seq = False
+            try:
+                for chunk in _req.stream(
+                    url, timeout=timeout, max_retries=max_retries,
+                    extra_headers=extra_headers or None,
+                ):
+                    bytes_remaining -= len(chunk)
+                    self._fire_progress(sabr_cfg, stream, chunk, fh, bytes_remaining)
+            except HTTPError as e:
+                if e.code not in (403, 404):
+                    raise
+                fh.seek(0)
+                fh.truncate()
+                bytes_remaining = known_filesize
+                used_seq = True
+                for chunk in _req.seq_stream(url, timeout=timeout, max_retries=max_retries):
+                    bytes_remaining -= len(chunk)
+                    self._fire_progress(sabr_cfg, stream, chunk, fh, bytes_remaining)
+
+        # ── size check ─────────────────────────────────────────────────────
+        if stream.filesize and stream.filesize > 0 and not used_seq:
+            try:
+                actual = os.path.getsize(file_path)
+            except OSError:
+                actual = None
+            if actual is not None:
+                shortfall = stream.filesize - actual
+                if shortfall > stream.filesize * 0.01:
+                    raise DownloadError(
+                        f"download incomplete: got {actual} bytes, "
+                        f"expected {stream.filesize} ({shortfall} short). "
+                        "Retry the download.",
+                        video_id=stream.video.video_id,
+                        url=stream.video.url,
+                    )
+
+        self._fire_complete(sabr_cfg, stream, file_path)
+        return file_path
+
+    @staticmethod
+    def _fire_progress(sabr_cfg, stream, chunk: bytes, fh, bytes_remaining: int) -> None:
+        fh.write(chunk)
+        if sabr_cfg and sabr_cfg.on_progress:
+            sabr_cfg.on_progress(stream, chunk, bytes_remaining)
+
+    @staticmethod
+    def _fire_complete(sabr_cfg, stream, file_path: str) -> None:
+        if sabr_cfg and sabr_cfg.on_complete:
+            sabr_cfg.on_complete(stream, file_path)
 
     # ── helpers ─────────────────────────────────────────────────────────────
 

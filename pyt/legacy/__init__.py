@@ -1,40 +1,65 @@
-"""Explicit-import home for the deprecated developer interface.
+"""pyt.legacy — v2 compatibility shims.
 
-The legacy classes still emit :class:`DeprecationWarning` when constructed
-from anywhere, including this module. The point of :mod:`pyt.legacy` is
-twofold:
+These re-export the legacy pytube-era classes from their original modules.
+They are preserved here through v3; plan to remove in v4.
 
-1. Make it grep-able which call sites are still on the old API
-   (``from pyt.legacy import YouTube`` is unambiguous).
-2. Survive the eventual removal of the same names from the top-level
-   ``pyt`` namespace — a top-level ``YouTube`` will go away in v3, but
-   ``pyt.legacy.YouTube`` will remain available for one more release
-   to give users a migration window.
+Migration guide: https://github.com/ramsy0dev/pyt/docs/migration-v3.md
 
-If you want to silence the deprecation warning while you migrate::
+Usage::
 
-    import warnings
-    warnings.filterwarnings("ignore", category=DeprecationWarning, module=r"pyt\\.")
+    # Old (top-level) — no longer works in v3:
+    from pyt import YouTube, Stream, Playlist
+
+    # Shim (works through v3, removed in v4):
+    from pyt.legacy import YouTube, Stream, Caption, Playlist, Channel, Search
+
+    # New (permanent):
+    from pyt import Client
+    video = Client().video(url)
 """
-from pyt.__main__ import YouTube
-from pyt.streams import Stream
-from pyt.query import StreamQuery, CaptionQuery
-from pyt.captions import Caption
-from pyt.monostate import Monostate
-from pyt.contrib.playlist import Playlist
-from pyt.contrib.channel import Channel
-from pyt.contrib.search import Search
-from pyt.archive import DownloadArchive
+import warnings as _warnings
 
-__all__ = [
-    "YouTube",
-    "Stream",
-    "StreamQuery",
-    "CaptionQuery",
-    "Caption",
-    "Monostate",
-    "Playlist",
-    "Channel",
-    "Search",
-    "DownloadArchive",
-]
+
+def _warn(name: str) -> None:
+    _warnings.warn(
+        f"pyt.legacy.{name} is a v2 compatibility shim and will be removed in v4. "
+        "Migrate to pyt.Client — see https://github.com/ramsy0dev/pyt/docs/migration-v3.md",
+        DeprecationWarning,
+        stacklevel=3,
+    )
+
+
+def __getattr__(name: str):
+    if name == "YouTube":
+        _warn(name)
+        from pyt.__main__ import YouTube
+        return YouTube
+    if name == "Stream":
+        _warn(name)
+        from pyt.streams import Stream
+        return Stream
+    if name == "Caption":
+        _warn(name)
+        from pyt.captions import Caption
+        return Caption
+    if name in ("StreamQuery", "CaptionQuery"):
+        _warn(name)
+        from pyt.query import StreamQuery, CaptionQuery
+        return StreamQuery if name == "StreamQuery" else CaptionQuery
+    if name == "Monostate":
+        _warn(name)
+        from pyt.monostate import Monostate
+        return Monostate
+    if name == "Playlist":
+        _warn(name)
+        from pyt.contrib.playlist import Playlist
+        return Playlist
+    if name == "Channel":
+        _warn(name)
+        from pyt.contrib.channel import Channel
+        return Channel
+    if name == "Search":
+        _warn(name)
+        from pyt.contrib.search import Search
+        return Search
+    raise AttributeError(f"module 'pyt.legacy' has no attribute {name!r}")

@@ -20,7 +20,10 @@ from urllib.error import HTTPError
 from typing import List, Optional
 
 from pyt import __version__
-from pyt import CaptionQuery, Playlist, Stream, YouTube
+from pyt.__main__ import YouTube
+from pyt.query import CaptionQuery
+from pyt.streams import Stream
+from pyt.contrib.playlist import Playlist
 from pyt.contrib.channel import Channel
 from pyt.archive import DownloadArchive
 from pyt.config import apply_config, load_config

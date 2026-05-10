@@ -1,7 +1,7 @@
 import datetime
 from unittest import mock
 
-from pyt import Playlist
+from pyt.contrib.playlist import Playlist
 
 
 @mock.patch("pyt.request.get")

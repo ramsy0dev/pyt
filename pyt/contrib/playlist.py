@@ -17,11 +17,8 @@ from typing import (
     Union
 )
 
-from pyt import (
-    extract,
-    request,
-    YouTube
-)
+from pyt import extract, request
+from pyt.__main__ import YouTube
 from pyt.helpers import (
     cache,
     DeferredGeneratorList,

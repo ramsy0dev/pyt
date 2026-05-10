@@ -3,7 +3,7 @@ from unittest import mock
 import pytest
 import pyt.exceptions as exceptions
 
-from pyt import YouTube
+from pyt.legacy import YouTube
 
 def test_video_unavailable():
     try:

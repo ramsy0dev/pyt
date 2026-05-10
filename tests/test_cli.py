@@ -4,12 +4,9 @@ import logging
 import argparse
 
 from pyt.exceptions import PytError
-from pyt import (
-    cli,
-    Caption,
-    StreamQuery,
-    CaptionQuery
-)
+from pyt import cli
+from pyt.captions import Caption
+from pyt.query import StreamQuery, CaptionQuery
 
 from unittest import mock
 from unittest.mock import (
@@ -41,7 +38,7 @@ def test_download_when_itag_not_found(youtube, display_streams):
     display_streams.assert_called_with(youtube)
 
 @mock.patch("pyt.cli.YouTube")
-@mock.patch("pyt.Stream")
+@mock.patch("pyt.streams.Stream")
 def test_download_when_itag_is_found(youtube, stream):
     stream.itag = 123
     stream.exists_at_path.return_value = False
@@ -55,7 +52,7 @@ def test_download_when_itag_is_found(youtube, stream):
     stream.download.assert_called()
 
 @mock.patch("pyt.cli.YouTube")
-@mock.patch("pyt.Stream")
+@mock.patch("pyt.streams.Stream")
 def test_display_stream(youtube, stream, capsys):
     # Given
     stream.itag = 123
@@ -125,7 +122,7 @@ def test_draw_progress_bar(capsys):
     assert "25 B/100 B" in out
     assert "eta" in out
 
-@mock.patch("pyt.Stream")
+@mock.patch("pyt.streams.Stream")
 def test_on_progress(stream):
     stream.filesize = 10
     cli._DL_STATE.clear()
@@ -280,8 +277,8 @@ def test_download_with_playlist_video_error(
     assert " x " in captured.out
 
 @mock.patch("pyt.cli.YouTube")
-@mock.patch("pyt.StreamQuery")
-@mock.patch("pyt.Stream")
+@mock.patch("pyt.query.StreamQuery")
+@mock.patch("pyt.streams.Stream")
 @mock.patch("pyt.cli._download")
 def test_download_by_resolution(download, stream, stream_query, youtube):
     # Given
@@ -295,7 +292,7 @@ def test_download_by_resolution(download, stream, stream_query, youtube):
     download.assert_called_with(stream, target="test_target", filename=None, pp_chain=None, youtube=youtube)
 
 @mock.patch("pyt.cli.YouTube")
-@mock.patch("pyt.StreamQuery")
+@mock.patch("pyt.query.StreamQuery")
 @mock.patch("pyt.cli._download")
 def test_download_by_resolution_not_exists(download, stream_query, youtube):
     stream_query.get_by_resolution.return_value = None
@@ -306,7 +303,7 @@ def test_download_by_resolution_not_exists(download, stream_query, youtube):
         )
     download.assert_not_called()
 
-@mock.patch("pyt.Stream")
+@mock.patch("pyt.streams.Stream")
 def test_download_stream_file_exists(stream, capsys):
     # Given
     stream.filesize_approx = 1048576

@@ -1,19 +1,15 @@
-"""The :class:`Video` — a thin, typed facade over :class:`pyt.YouTube`."""
+"""The :class:`Video` — a typed facade backed by a raw InnerTube player response."""
 from __future__ import annotations
 
 import logging
 import shutil
 import subprocess  # nosec
-import warnings
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Union
 
-import pyt.exceptions as legacy_exc
-from pyt.__main__ import YouTube as _LegacyYouTube
-
-
 logger = logging.getLogger(__name__)
+
 from pyt.api.errors import (
     AgeRestricted,
     LiveStreamNotSupported,
@@ -24,49 +20,37 @@ from pyt.api.errors import (
 )
 from pyt.api.models import Channel, Thumbnail, VideoMeta
 from pyt.api.streams import StreamSet
-
-
-def _translate(exc: BaseException, *, video_id: Optional[str], url: Optional[str]) -> PytError:
-    """Map a legacy exception onto the modern error tree."""
-    if isinstance(exc, legacy_exc.AgeRestrictedError):
-        return AgeRestricted(video_id=exc.video_id, url=url)
-    if isinstance(exc, legacy_exc.LiveStreamError):
-        # The legacy layer raises LiveStreamError when it hits liveStreamability
-        # in the stream manifest. By the time we reach here we've already
-        # raised LiveStreamUpcoming in _hydrate_meta for scheduled streams,
-        # so this path is always an active broadcast.
-        return LiveStreamNotSupported(video_id=exc.video_id, url=url)
-    if isinstance(exc, legacy_exc.VideoUnavailable):
-        reason_map = {
-            legacy_exc.VideoPrivate: "private",
-            legacy_exc.MembersOnly: "members-only",
-            legacy_exc.VideoRegionBlocked: "region-blocked",
-            legacy_exc.RecordingUnavailable: "recording unavailable",
-        }
-        reason = reason_map.get(type(exc), "unavailable")
-        return VideoUnavailable(video_id=exc.video_id, reason=reason, url=url)
-    if isinstance(exc, legacy_exc.PytError):
-        wrapped = PytError(str(exc))
-        wrapped.video_id = video_id
-        wrapped.url = url
-        return wrapped
-    return None  # not ours; let it propagate
+from pyt.api._sabr_config import _SabrConfig
+from pyt.api._streams_hydrator import hydrate_streams
 
 
 class Video:
     """A YouTube video and its attached :class:`StreamSet`.
 
     Construct via :meth:`Client.video`. Direct construction is not part
-    of the public API — the legacy class is needed for that.
+    of the public API.
     """
 
-    def __init__(self, legacy: _LegacyYouTube, *, meta: VideoMeta):
-        self._legacy = legacy
+    def __init__(
+        self,
+        *,
+        player_response: dict,
+        meta: VideoMeta,
+        client_name: str,
+        client_cfg: dict,
+        visitor_data: Optional[str] = None,
+        is_age_restricted: bool = False,
+    ):
+        self._player_response = player_response
         self._meta = meta
+        self._client_name = client_name
+        self._client_cfg = client_cfg
+        self._visitor_data = visitor_data
+        self._is_age_restricted = is_age_restricted
         self._streams: Optional[StreamSet] = None
-        # Filled in by Client.video() so the download path can ask
-        # the client to refresh the PO token on AttestationRequired.
-        # Stays None for direct Video construction (e.g. in tests).
+        self._sabr_config: Optional[_SabrConfig] = None
+        # Filled in by Client.video() so the download path can ask the
+        # client to refresh the PO token on AttestationRequired.
         self._client = None  # type: Optional[Any]
 
     # ── construction ────────────────────────────────────────────────────────
@@ -83,39 +67,33 @@ class Video:
         on_progress: Optional[Callable[[Any, bytes, int], None]],
         on_complete: Optional[Callable[[Any, Optional[str]], None]],
     ) -> "Video":
-        try:
-            with warnings.catch_warnings():
-                # The legacy YouTube class emits a DeprecationWarning at the
-                # boundary; suppress it here because we *are* the new API and
-                # the user is doing the right thing.
-                warnings.simplefilter("ignore", DeprecationWarning)
-                yt = _LegacyYouTube(
-                    url,
-                    on_progress_callback=on_progress,
-                    on_complete_callback=on_complete,
-                    proxies=proxies,
-                    use_oauth=use_oauth,
-                    allow_oauth_cache=allow_oauth_cache,
-                    po_token=po_token,
-                )
-        except legacy_exc.PytError as exc:
-            logger.warning("Video._from_url: legacy YouTube ctor failed for %s: %s", url, exc)
-            translated = _translate(exc, video_id=None, url=url)
-            raise translated if translated is not None else exc
+        from pyt.api._player import fetch_player_response
+        from pyt.extract import video_id as _extract_video_id
 
-        logger.debug("Video._from_url: legacy YouTube ctor OK, video_id=%s", yt.video_id)
+        video_id = _extract_video_id(url)
 
-        try:
-            meta = _hydrate_meta(yt, url=url)
-        except legacy_exc.PytError as exc:
-            logger.warning(
-                "Video._from_url: hydrate_meta failed for %s: %s",
-                getattr(yt, "video_id", "?"), exc,
-            )
-            translated = _translate(exc, video_id=getattr(yt, "video_id", None), url=url)
-            raise translated if translated is not None else exc
+        player_response, client_name, client_cfg, is_age_restricted = fetch_player_response(
+            video_id,
+            url,
+            use_oauth=use_oauth,
+            allow_oauth_cache=allow_oauth_cache,
+        )
 
-        return cls(yt, meta=meta)
+        logger.debug("Video._from_url: player response OK video_id=%s client=%s", video_id, client_name)
+
+        meta = _hydrate_meta(
+            player_response,
+            url=url,
+            is_age_restricted=is_age_restricted,
+        )
+
+        return cls(
+            player_response=player_response,
+            meta=meta,
+            client_name=client_name,
+            client_cfg=client_cfg,
+            is_age_restricted=is_age_restricted,
+        )
 
     # ── public surface ──────────────────────────────────────────────────────
 
@@ -196,10 +174,6 @@ class Video:
         """
         if self._streams is None:
             if self.is_age_restricted:
-                # Check whether the client attached to this video has any
-                # auth configured. If not, raise now with a clear message
-                # rather than letting the legacy bypass_age_gate() fail
-                # after several extra network round-trips.
                 client = self._client
                 has_auth = client is not None and (
                     getattr(client, "_cookies_path", None)
@@ -210,15 +184,30 @@ class Video:
                     raise AgeRestricted(self.video_id, url=self.url)
 
             logger.debug("video.streams: hydrating stream catalog for %s", self.video_id)
-            try:
-                fmt_streams = self._legacy.fmt_streams
-            except legacy_exc.PytError as exc:
-                logger.warning(
-                    "video.streams: fmt_streams failed for %s: %s", self.video_id, exc,
-                )
-                translated = _translate(exc, video_id=self.video_id, url=self.url)
-                raise translated if translated is not None else exc
-            self._streams = StreamSet._from_legacy(fmt_streams, video=self)
+
+            po_token = None
+            on_progress = None
+            on_complete = None
+            client = self._client
+            if client is not None:
+                po_token = getattr(client, '_current_po_token', lambda: None)()
+                on_progress = getattr(client, '_on_progress', None)
+                on_complete = getattr(client, '_on_complete', None)
+
+            raw_streams, sabr_config = hydrate_streams(
+                self._player_response,
+                client_name=self._client_name,
+                client_cfg=self._client_cfg,
+                visitor_data=self._visitor_data,
+                po_token=po_token,
+                on_progress=on_progress,
+                on_complete=on_complete,
+                duration=self._meta.length.total_seconds() if self._meta.length else None,
+                video_id=self.video_id,
+                title=self.title,
+            )
+            self._sabr_config = sabr_config
+            self._streams = StreamSet._from_raw(raw_streams, video=self)
             logger.info(
                 "video.streams: %s catalog has %d streams",
                 self.video_id, len(self._streams),
@@ -238,14 +227,6 @@ class Video:
     ):
         """Pick the best adaptive video + audio pair and run them through
         a single multiplexed SABR session, then merge with ffmpeg.
-
-        :param prefer_resolution: e.g. ``"1080p"``. When unset, picks the
-            highest available adaptive video. When the requested resolution
-            isn't available, returns the highest one at-or-below it.
-        :param container: override the merge container. Auto-detected from
-            the codec pair by default (mp4 / webm / mkv).
-        :returns: a :class:`CombinedDownload` builder. Call ``.run()`` (or
-            chain post-processing with ``.then(...)`` / ``|``) to execute.
         """
         from pyt.api.combined import CombinedDownload
 
@@ -276,30 +257,13 @@ class Video:
         Uses ``ffmpeg -i <hls_url> -c copy`` to capture the stream in
         real time. The call **blocks** until the broadcast ends or the
         process is interrupted (Ctrl-C / SIGINT is propagated cleanly).
-
-        :param output_path: directory or full path for the output file.
-            Defaults to the current working directory.
-        :param filename: override the output filename. Defaults to the
-            video title with a ``.ts`` extension (TS is the natural
-            container for HLS streams).
-        :param timeout: maximum seconds to record; ``None`` means record
-            until the stream ends.
-        :returns: :class:`Path` of the recorded file.
-        :raises LiveStreamNotSupported: if the video is not currently live.
-        :raises RuntimeError: if ffmpeg is not on PATH.
         """
         if not self.is_live:
-            if self.is_live_content:
-                raise LiveStreamNotSupported(
-                    self.video_id, url=self.url,
-                )
             raise LiveStreamNotSupported(self.video_id, url=self.url)
 
         hls_url = self.hls_manifest_url
         if not hls_url:
-            raise LiveStreamNotSupported(
-                self.video_id, url=self.url,
-            )
+            raise LiveStreamNotSupported(self.video_id, url=self.url)
 
         ffmpeg = shutil.which("ffmpeg")
         if not ffmpeg:
@@ -320,11 +284,7 @@ class Video:
             p = Path(output_path)
             dest = (p / out_filename) if p.is_dir() else p
 
-        cmd = [
-            ffmpeg, "-y",
-            "-i", hls_url,
-            "-c", "copy",
-        ]
+        cmd = [ffmpeg, "-y", "-i", hls_url, "-c", "copy"]
         if timeout is not None:
             cmd += ["-t", str(timeout)]
         cmd.append(str(dest))
@@ -334,7 +294,7 @@ class Video:
             self.video_id, dest, timeout,
         )
         try:
-            subprocess.run(cmd, check=True)  # nosec — argv fully constructed
+            subprocess.run(cmd, check=True)  # nosec
         except subprocess.CalledProcessError as exc:
             raise PostProcessError(
                 f"ffmpeg exited {exc.returncode} while recording live stream",
@@ -344,27 +304,18 @@ class Video:
             ) from exc
         return dest
 
-    # ── escape hatch ────────────────────────────────────────────────────────
-
-    @property
-    def legacy(self) -> _LegacyYouTube:
-        """The underlying :class:`pyt.YouTube`. Use this when you need
-        functionality not yet exposed by the modern API. We treat any
-        attribute reachable through ``.legacy`` as semi-public — it won't
-        be removed without notice.
-        """
-        return self._legacy
-
     def __repr__(self) -> str:
         return f"<Video id={self.video_id!r} title={self.title!r}>"
 
 
-def _hydrate_meta(yt: _LegacyYouTube, *, url: str) -> VideoMeta:
-    """Eagerly read everything we need from the legacy object so the
-    :class:`Video` we return has no remaining hidden network I/O.
-    """
-    yt.check_availability()
-    details = yt.vid_info.get("videoDetails", {}) or {}
+def _hydrate_meta(
+    player_response: dict,
+    *,
+    url: str,
+    is_age_restricted: bool = False,
+) -> VideoMeta:
+    """Build a :class:`VideoMeta` from a raw InnerTube player response dict."""
+    details = player_response.get("videoDetails", {}) or {}
 
     raw_thumbs = details.get("thumbnail", {}).get("thumbnails", []) or []
     thumbnails = [
@@ -396,21 +347,20 @@ def _hydrate_meta(yt: _LegacyYouTube, *, url: str) -> VideoMeta:
 
     rating = details.get("averageRating")
 
+    # publish_date from microformat (present in InnerTube player responses)
     published_at: Optional[datetime] = None
     try:
-        published_at = yt.publish_date
-    except Exception:
+        pub_str = (
+            player_response
+            .get("microformat", {})
+            .get("playerMicroformatRenderer", {})
+            .get("publishDate")
+        )
+        if pub_str:
+            published_at = datetime.strptime(pub_str, "%Y-%m-%d")
+    except (ValueError, AttributeError):
         pass
 
-    # age_restricted is detected from watch_html, already cached by the
-    # legacy layer as a side-effect of fetching vid_info.
-    try:
-        is_age_restricted = bool(yt.age_restricted)
-    except Exception:  # noqa: BLE001 — never let logging/detection crash hydration
-        is_age_restricted = False
-
-    # isLive  = broadcast is happening right now
-    # isLiveContent = video was ever a live stream (includes ended recordings)
     is_live = bool(details.get("isLive"))
     is_live_content = bool(details.get("isLiveContent"))
     is_upcoming = bool(details.get("isUpcoming"))
@@ -418,12 +368,12 @@ def _hydrate_meta(yt: _LegacyYouTube, *, url: str) -> VideoMeta:
     hls_manifest_url: Optional[str] = None
     scheduled_start: Optional[datetime] = None
 
-    streaming_data = yt.vid_info.get("streamingData") or {}
+    streaming_data = player_response.get("streamingData") or {}
     if is_live:
         hls_manifest_url = streaming_data.get("hlsManifestUrl") or None
 
     if is_upcoming:
-        playability = yt.vid_info.get("playabilityStatus") or {}
+        playability = player_response.get("playabilityStatus") or {}
         offline_slate = playability.get("offlineSlate") or {}
         ts_str = offline_slate.get("scheduledStartTime")
         if ts_str:
@@ -431,16 +381,19 @@ def _hydrate_meta(yt: _LegacyYouTube, *, url: str) -> VideoMeta:
                 scheduled_start = datetime.fromtimestamp(int(ts_str), tz=timezone.utc)
             except (TypeError, ValueError):
                 pass
+        video_id = details.get("videoId", "")
         raise LiveStreamUpcoming(
-            video_id=yt.video_id,
+            video_id=video_id,
             url=url,
             scheduled_start=scheduled_start,
         )
 
+    video_id = details.get("videoId", "")
+
     return VideoMeta(
-        video_id=yt.video_id,
+        video_id=video_id,
         url=url,
-        title=details.get("title") or yt.title,
+        title=details.get("title") or "",
         author=author,
         length=length,
         description=details.get("shortDescription"),

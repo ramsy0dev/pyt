@@ -6,7 +6,7 @@ import gzip
 from unittest import mock
 
 import pytest
-from pyt import YouTube
+from pyt.legacy import YouTube
 
 def load_playback_file(filename):
     """Load a gzip json playback file."""

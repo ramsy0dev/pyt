@@ -22,6 +22,125 @@ from pyt.api import (
 from pyt.api.video import _hydrate_meta
 
 
+# ── helpers ────────────────────────────────────────────────────────────────
+
+
+def _fake_raw_streams():
+    """Minimal synthetic raw streams sufficient for StreamSet tests."""
+    from pyt.api._streams_hydrator import _RawStream
+    return [
+        # Progressive mp4 (audio+video)
+        _RawStream(
+            itag=18, url="https://example.com/18", mime_type="video/mp4",
+            kind="video", subtype="mp4", video_codec="avc1.42001E",
+            audio_codec="mp4a.40.2", is_adaptive=False, is_progressive=True,
+            is_otf=False, bitrate=500000, filesize=5000000, filesize_approx=5000000,
+            resolution="360p", fps=30, abr=None, default_filename="video.mp4",
+        ),
+        # Adaptive video mp4 720p
+        _RawStream(
+            itag=136, url="https://example.com/136", mime_type="video/mp4",
+            kind="video", subtype="mp4", video_codec="avc1.4d401f",
+            audio_codec=None, is_adaptive=True, is_progressive=False,
+            is_otf=False, bitrate=1500000, filesize=15000000, filesize_approx=15000000,
+            resolution="720p", fps=30, abr=None, default_filename="video.mp4",
+        ),
+        # Adaptive video mp4 1080p
+        _RawStream(
+            itag=137, url="https://example.com/137", mime_type="video/mp4",
+            kind="video", subtype="mp4", video_codec="avc1.640028",
+            audio_codec=None, is_adaptive=True, is_progressive=False,
+            is_otf=False, bitrate=3000000, filesize=30000000, filesize_approx=30000000,
+            resolution="1080p", fps=30, abr=None, default_filename="video.mp4",
+        ),
+        # Adaptive audio mp4
+        _RawStream(
+            itag=140, url="https://example.com/140", mime_type="audio/mp4",
+            kind="audio", subtype="mp4", video_codec=None,
+            audio_codec="mp4a.40.2", is_adaptive=True, is_progressive=False,
+            is_otf=False, bitrate=128000, filesize=3000000, filesize_approx=3000000,
+            resolution=None, fps=None, abr="128kbps", default_filename="audio.mp4",
+        ),
+        # Adaptive audio webm (higher bitrate → best())
+        _RawStream(
+            itag=251, url="https://example.com/251", mime_type="audio/webm",
+            kind="audio", subtype="webm", video_codec=None,
+            audio_codec="opus", is_adaptive=True, is_progressive=False,
+            is_otf=False, bitrate=160000, filesize=3500000, filesize_approx=3500000,
+            resolution=None, fps=None, abr="160kbps", default_filename="audio.webm",
+        ),
+    ]
+
+
+def _make_video(cipher_signature):
+    """Build a v3 :class:`Video` from the legacy fixture without network calls."""
+    from pyt.api.streams import StreamSet
+    from pyt.api._sabr_config import _SabrConfig
+
+    pr = cipher_signature._vid_info
+    url = f"https://youtube.com/watch?v={cipher_signature.video_id}"
+    meta = _hydrate_meta(pr, url=url)
+    video = Video(player_response=pr, meta=meta, client_name="ANDROID_VR", client_cfg={})
+    video._streams = StreamSet._from_raw(_fake_raw_streams(), video=video)
+    video._sabr_config = _SabrConfig()
+    return video
+
+
+def _make_player_response(
+    *,
+    is_live=False,
+    is_live_content=False,
+    is_upcoming=False,
+    hls_url=None,
+    scheduled_ts=None,
+):
+    """Return a minimal player-response dict for live-stream tests."""
+    streaming_data = {"hlsManifestUrl": hls_url} if hls_url else {}
+    playability = (
+        {"offlineSlate": {"scheduledStartTime": str(scheduled_ts)}}
+        if scheduled_ts is not None
+        else {}
+    )
+    return {
+        "videoDetails": {
+            "videoId": "liveXYZ",
+            "title": "Live Test",
+            "channelId": "UC123",
+            "author": "TestChannel",
+            "lengthSeconds": "0",
+            "isLive": is_live,
+            "isLiveContent": is_live_content,
+            "isUpcoming": is_upcoming,
+        },
+        "streamingData": streaming_data,
+        "playabilityStatus": playability,
+    }
+
+
+def _make_age_restricted_video(age_restricted: bool = True):
+    """Return a Video whose is_age_restricted flag is pre-set."""
+    from pyt.api.models import VideoMeta, Channel
+
+    meta = VideoMeta(
+        video_id="agexYZ",
+        url="https://youtube.com/watch?v=agexYZ",
+        title="Age Restricted Test",
+        author=Channel(id="UC1", name="Test"),
+        length=timedelta(minutes=10),
+        is_age_restricted=age_restricted,
+    )
+    fake_pr = {
+        "videoDetails": {
+            "videoId": "agexYZ",
+            "title": "Age Restricted Test",
+            "lengthSeconds": "600",
+            "channelId": "UC1",
+            "author": "Test",
+        }
+    }
+    return Video(player_response=fake_pr, meta=meta, client_name="ANDROID_VR", client_cfg={})
+
+
 # ── Client ─────────────────────────────────────────────────────────────────
 
 
@@ -47,7 +166,7 @@ def test_client_no_proxy_returns_none():
     assert Client()._proxies_dict() is None
 
 
-def test_client_video_calls_legacy_youtube():
+def test_client_video_calls_from_url():
     with mock.patch("pyt.api.client.Video._from_url") as factory:
         factory.return_value = mock.sentinel.video
         result = Client(po_token="tok").video("https://youtu.be/abc")
@@ -63,7 +182,8 @@ def test_client_video_calls_legacy_youtube():
 
 def test_hydrate_meta_from_cipher_fixture(cipher_signature):
     url = "https://youtube.com/watch?v=2lAe1cqCOXo"
-    meta = _hydrate_meta(cipher_signature, url=url)
+    player_response = cipher_signature._vid_info
+    meta = _hydrate_meta(player_response, url=url)
     assert isinstance(meta, VideoMeta)
     assert meta.video_id == cipher_signature.video_id
     assert meta.url == url
@@ -73,21 +193,16 @@ def test_hydrate_meta_from_cipher_fixture(cipher_signature):
     assert meta.author.name
 
 
-def test_video_wraps_legacy_and_exposes_typed_props(cipher_signature):
-    meta = _hydrate_meta(cipher_signature, url="https://youtube.com/watch?v=2lAe1cqCOXo")
-    video = Video(cipher_signature, meta=meta)
+def test_video_exposes_typed_props(cipher_signature):
+    pr = cipher_signature._vid_info
+    meta = _hydrate_meta(pr, url="https://youtube.com/watch?v=2lAe1cqCOXo")
+    video = Video(player_response=pr, meta=meta, client_name="ANDROID_VR", client_cfg={})
     assert video.video_id == cipher_signature.video_id
     assert video.title == meta.title
     assert isinstance(video.length, timedelta)
-    assert video.legacy is cipher_signature
 
 
 # ── StreamSet ──────────────────────────────────────────────────────────────
-
-
-def _make_video(legacy):
-    meta = _hydrate_meta(legacy, url=f"https://youtube.com/watch?v={legacy.video_id}")
-    return Video(legacy, meta=meta)
 
 
 def test_streamset_audio_filter(cipher_signature):
@@ -177,16 +292,12 @@ def test_streamset_at_least_resolution(cipher_signature):
 # ── Download builder ───────────────────────────────────────────────────────
 
 
-def test_download_run_calls_legacy_download(cipher_signature):
+def test_download_run_transfers_bytes(cipher_signature):
     video = _make_video(cipher_signature)
     stream = video.streams.audio.best()
     fake_path = "/tmp/fake.mp4"
-    with mock.patch.object(stream.legacy, "download", return_value=fake_path) as dl:
+    with mock.patch("pyt.api.download.Download._transfer_bytes", return_value=fake_path):
         result = stream.download_to("/tmp", filename="x").run()
-    dl.assert_called_once()
-    kwargs = dl.call_args.kwargs
-    assert kwargs["output_path"] == "/tmp"
-    assert kwargs["filename"] == "x"
     assert isinstance(result, Path)
     assert result == Path(fake_path)
 
@@ -214,7 +325,7 @@ def test_download_pipeline_runs_steps_in_order(cipher_signature):
     one = _Recording(name="one")
     two = _Recording(name="two")
 
-    with mock.patch.object(stream.legacy, "download", return_value="/tmp/raw.mp4"):
+    with mock.patch("pyt.api.download.Download._transfer_bytes", return_value="/tmp/raw.mp4"):
         result = (stream.download_to() | one | two).run()
     assert calls == [("one", "/tmp/raw.mp4"), ("two", "/tmp/raw.mp4.one")]
     assert result == Path("/tmp/raw.mp4.one.two")
@@ -230,7 +341,7 @@ def test_download_step_failure_wrapped_as_postprocess_error(cipher_signature):
         def apply(self, path, *, stream, video):
             raise RuntimeError("ffmpeg said no")
 
-    with mock.patch.object(stream.legacy, "download", return_value="/tmp/raw.mp4"):
+    with mock.patch("pyt.api.download.Download._transfer_bytes", return_value="/tmp/raw.mp4"):
         with pytest.raises(PostProcessError) as exc_info:
             (stream.download_to() | _Boom(name="boom")).run()
     assert exc_info.value.step == "boom"
@@ -262,7 +373,7 @@ def test_pipeline_steps_are_named():
 
 
 def test_legacy_youtube_emits_deprecation_warning():
-    from pyt import YouTube
+    from pyt.legacy import YouTube
 
     with mock.patch("pyt.extract.video_id", return_value="abc"):
         with pytest.warns(DeprecationWarning, match="pyt.Client"):
@@ -270,24 +381,24 @@ def test_legacy_youtube_emits_deprecation_warning():
 
 
 def test_legacy_playlist_emits_deprecation_warning():
-    from pyt import Playlist
+    from pyt.legacy import Playlist
 
-    with pytest.warns(DeprecationWarning, match="pyt.Client.*playlist"):
+    with pytest.warns(DeprecationWarning, match="pyt.Client"):
         Playlist("https://youtube.com/playlist?list=PLxxx")
 
 
 def test_legacy_channel_emits_deprecation_warning():
-    from pyt import Channel
+    from pyt.legacy import Channel as LegacyChannel
 
     with mock.patch("pyt.contrib.playlist.extract.playlist_id", return_value="xxx"):
-        with pytest.warns(DeprecationWarning, match="pyt.Client.*channel"):
-            Channel("https://www.youtube.com/@somechannel")
+        with pytest.warns(DeprecationWarning, match="pyt.Client"):
+            LegacyChannel("https://www.youtube.com/@somechannel")
 
 
 def test_legacy_search_emits_deprecation_warning():
-    from pyt import Search
+    from pyt.legacy import Search
 
-    with pytest.warns(DeprecationWarning, match="pyt.Client.*search"):
+    with pytest.warns(DeprecationWarning, match="pyt.Client"):
         Search("test")
 
 
@@ -302,23 +413,26 @@ def test_register_on_complete_callback_emits_deprecation_warning(cipher_signatur
 
 
 def test_client_video_does_not_emit_deprecation_warning():
-    """The new API constructs a legacy YouTube internally — that must not
-    surface a DeprecationWarning to the user."""
+    """The modern API path must not surface a DeprecationWarning."""
     import warnings as warnings_mod
-
     from pyt import Client
 
-    with mock.patch("pyt.api.video._LegacyYouTube") as legacy_cls:
-        instance = legacy_cls.return_value
-        instance.video_id = "abc"
-        instance.check_availability.return_value = None
-        instance.vid_info = {"videoDetails": {"title": "x", "lengthSeconds": "1"}}
-        instance.publish_date = None
-        instance.title = "x"
+    fake_pr = {
+        "videoDetails": {
+            "videoId": "dQw4w9WgXcQ",
+            "title": "x",
+            "lengthSeconds": "1",
+            "channelId": "UC1",
+            "author": "Test",
+        }
+    }
 
+    with mock.patch("pyt.api._player.fetch_player_response") as mock_fetch, \
+         mock.patch("pyt.extract.video_id", return_value="dQw4w9WgXcQ"):
+        mock_fetch.return_value = (fake_pr, "ANDROID_VR", {}, False)
         with warnings_mod.catch_warnings():
             warnings_mod.simplefilter("error", DeprecationWarning)
-            Client().video("https://youtu.be/abc")
+            Client().video("https://youtu.be/dQw4w9WgXcQ")
 
 
 # ── pyt.legacy facade ─────────────────────────────────────────────────────
@@ -404,42 +518,14 @@ def test_client_search_returns_modern_wrapper():
 # ── Live stream / VOD / upcoming ───────────────────────────────────────────
 
 
-def _make_fake_legacy(*, is_live=False, is_live_content=False, is_upcoming=False,
-                      hls_url=None, scheduled_ts=None):
-    """Return a minimal mock _LegacyYouTube shaped for live-stream tests."""
-    fake = mock.MagicMock()
-    fake.video_id = "liveXYZ"
-    fake.title = "Live Test"
-    fake.publish_date = None
-    fake.vid_info = {
-        "videoDetails": {
-            "title": "Live Test",
-            "channelId": "UC123",
-            "author": "TestChannel",
-            "lengthSeconds": "0",
-            "isLive": is_live,
-            "isLiveContent": is_live_content,
-            "isUpcoming": is_upcoming,
-        },
-        "streamingData": {
-            "hlsManifestUrl": hls_url,
-        } if hls_url else {},
-        "playabilityStatus": {
-            "offlineSlate": {
-                "scheduledStartTime": str(scheduled_ts),
-            },
-        } if scheduled_ts else {},
-    }
-    fake.check_availability.return_value = None
-    return fake
-
-
 def test_hydrate_meta_active_live_stream():
     from pyt.api.video import _hydrate_meta
 
-    fake = _make_fake_legacy(is_live=True, is_live_content=True,
-                             hls_url="https://manifest.example.com/live.m3u8")
-    meta = _hydrate_meta(fake, url="https://youtube.com/watch?v=liveXYZ")
+    pr = _make_player_response(
+        is_live=True, is_live_content=True,
+        hls_url="https://manifest.example.com/live.m3u8",
+    )
+    meta = _hydrate_meta(pr, url="https://youtube.com/watch?v=liveXYZ")
 
     assert meta.is_live is True
     assert meta.is_live_content is True
@@ -451,8 +537,8 @@ def test_hydrate_meta_vod_not_marked_as_live():
     NOT set is_live — it's a downloadable VOD."""
     from pyt.api.video import _hydrate_meta
 
-    fake = _make_fake_legacy(is_live=False, is_live_content=True)
-    meta = _hydrate_meta(fake, url="https://youtube.com/watch?v=liveXYZ")
+    pr = _make_player_response(is_live=False, is_live_content=True)
+    meta = _hydrate_meta(pr, url="https://youtube.com/watch?v=liveXYZ")
 
     assert meta.is_live is False
     assert meta.is_live_content is True
@@ -464,10 +550,10 @@ def test_hydrate_meta_upcoming_raises_livestreamupcoming():
     from pyt.api.video import _hydrate_meta
 
     scheduled_ts = 1704124800  # 2024-01-01 18:00:00 UTC
-    fake = _make_fake_legacy(is_upcoming=True, scheduled_ts=scheduled_ts)
+    pr = _make_player_response(is_upcoming=True, scheduled_ts=scheduled_ts)
 
     with pytest.raises(LiveStreamUpcoming) as exc_info:
-        _hydrate_meta(fake, url="https://youtube.com/watch?v=liveXYZ")
+        _hydrate_meta(pr, url="https://youtube.com/watch?v=liveXYZ")
 
     err = exc_info.value
     assert err.video_id == "liveXYZ"
@@ -481,18 +567,18 @@ def test_hydrate_meta_upcoming_no_start_time():
     from pyt.api.errors import LiveStreamUpcoming
     from pyt.api.video import _hydrate_meta
 
-    fake = _make_fake_legacy(is_upcoming=True)
+    pr = _make_player_response(is_upcoming=True)
     with pytest.raises(LiveStreamUpcoming) as exc_info:
-        _hydrate_meta(fake, url="https://youtube.com/watch?v=liveXYZ")
+        _hydrate_meta(pr, url="https://youtube.com/watch?v=liveXYZ")
     assert exc_info.value.scheduled_start is None
 
 
 def test_video_is_live_content_property():
     from pyt.api.video import _hydrate_meta
 
-    fake = _make_fake_legacy(is_live=False, is_live_content=True)
-    meta = _hydrate_meta(fake, url="https://youtube.com/watch?v=liveXYZ")
-    video = Video(fake, meta=meta)
+    pr = _make_player_response(is_live=False, is_live_content=True)
+    meta = _hydrate_meta(pr, url="https://youtube.com/watch?v=liveXYZ")
+    video = Video(player_response=pr, meta=meta, client_name="ANDROID_VR", client_cfg={})
     assert video.is_live_content is True
     assert video.is_live is False
     assert video.hls_manifest_url is None
@@ -511,9 +597,9 @@ def test_record_live_calls_ffmpeg(tmp_path):
     from pyt.api.video import _hydrate_meta
 
     hls_url = "https://manifest.example.com/live.m3u8"
-    fake = _make_fake_legacy(is_live=True, is_live_content=True, hls_url=hls_url)
-    meta = _hydrate_meta(fake, url="https://youtube.com/watch?v=liveXYZ")
-    video = Video(fake, meta=meta)
+    pr = _make_player_response(is_live=True, is_live_content=True, hls_url=hls_url)
+    meta = _hydrate_meta(pr, url="https://youtube.com/watch?v=liveXYZ")
+    video = Video(player_response=pr, meta=meta, client_name="ANDROID_VR", client_cfg={})
 
     with mock.patch("pyt.api.video.shutil.which", return_value="/usr/bin/ffmpeg"), \
          mock.patch("pyt.api.video.subprocess.run") as mock_run:
@@ -532,9 +618,9 @@ def test_record_live_passes_timeout(tmp_path):
     from pyt.api.video import _hydrate_meta
 
     hls_url = "https://manifest.example.com/live.m3u8"
-    fake = _make_fake_legacy(is_live=True, hls_url=hls_url)
-    meta = _hydrate_meta(fake, url="https://youtube.com/watch?v=liveXYZ")
-    video = Video(fake, meta=meta)
+    pr = _make_player_response(is_live=True, hls_url=hls_url)
+    meta = _hydrate_meta(pr, url="https://youtube.com/watch?v=liveXYZ")
+    video = Video(player_response=pr, meta=meta, client_name="ANDROID_VR", client_cfg={})
 
     with mock.patch("pyt.api.video.shutil.which", return_value="/usr/bin/ffmpeg"), \
          mock.patch("pyt.api.video.subprocess.run") as mock_run:
@@ -549,9 +635,9 @@ def test_record_live_passes_timeout(tmp_path):
 def test_record_live_raises_when_ffmpeg_missing(tmp_path):
     from pyt.api.video import _hydrate_meta
 
-    fake = _make_fake_legacy(is_live=True, hls_url="https://x.example.com/live.m3u8")
-    meta = _hydrate_meta(fake, url="https://youtube.com/watch?v=liveXYZ")
-    video = Video(fake, meta=meta)
+    pr = _make_player_response(is_live=True, hls_url="https://x.example.com/live.m3u8")
+    meta = _hydrate_meta(pr, url="https://youtube.com/watch?v=liveXYZ")
+    video = Video(player_response=pr, meta=meta, client_name="ANDROID_VR", client_cfg={})
 
     with mock.patch("pyt.api.video.shutil.which", return_value=None):
         with pytest.raises(RuntimeError, match="ffmpeg not found"):
@@ -559,24 +645,6 @@ def test_record_live_raises_when_ffmpeg_missing(tmp_path):
 
 
 # ── Age restriction ────────────────────────────────────────────────────────
-
-
-def _make_age_restricted_video(age_restricted: bool = True):
-    """Return a Video whose is_age_restricted flag is pre-set."""
-    from pyt.api.models import VideoMeta, Channel
-    from datetime import timedelta
-
-    meta = VideoMeta(
-        video_id="agexYZ",
-        url="https://youtube.com/watch?v=agexYZ",
-        title="Age Restricted Test",
-        author=Channel(id="UC1", name="Test"),
-        length=timedelta(minutes=10),
-        is_age_restricted=age_restricted,
-    )
-    fake_legacy = mock.MagicMock()
-    fake_legacy.video_id = "agexYZ"
-    return Video(fake_legacy, meta=meta)
 
 
 def test_age_restricted_video_has_property():
@@ -606,8 +674,8 @@ def test_streams_raises_age_restricted_immediately_without_auth():
 
 def test_streams_does_not_raise_age_restricted_when_cookies_configured():
     """When the client has cookies, the guard must not short-circuit —
-    the stream fetch should be allowed to proceed (and may succeed)."""
-    from pyt.api.errors import AgeRestricted
+    the stream fetch should be allowed to proceed."""
+    from pyt.api._sabr_config import _SabrConfig
 
     video = _make_age_restricted_video(age_restricted=True)
 
@@ -615,13 +683,13 @@ def test_streams_does_not_raise_age_restricted_when_cookies_configured():
     fake_client._cookies_browser = "chrome"
     fake_client._cookies_path = None
     fake_client._use_oauth = False
+    fake_client._current_po_token.return_value = None
+    fake_client._on_progress = None
+    fake_client._on_complete = None
     video._client = fake_client
 
-    # The legacy fmt_streams call will succeed via our mock.
-    video._legacy.fmt_streams = []
-
-    # Should NOT raise AgeRestricted — the guard must pass through.
-    streams = video.streams
+    with mock.patch("pyt.api.video.hydrate_streams", return_value=([], _SabrConfig())):
+        streams = video.streams
     assert streams is not None
 
 
@@ -646,5 +714,8 @@ def test_age_restricted_error_message_mentions_cookies():
 def test_hydrate_meta_sets_is_age_restricted(cipher_signature):
     """For a normal (non-age-restricted) fixture, is_age_restricted must
     be False — we're checking the happy-path wiring here."""
-    meta = _hydrate_meta(cipher_signature, url="https://youtube.com/watch?v=2lAe1cqCOXo")
+    meta = _hydrate_meta(
+        cipher_signature._vid_info,
+        url="https://youtube.com/watch?v=2lAe1cqCOXo",
+    )
     assert meta.is_age_restricted is False

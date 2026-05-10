@@ -11,11 +11,8 @@ from typing import (
     Tuple
 )
 
-from pyt import (
-    extract,
-    Playlist,
-    request
-)
+from pyt import extract, request
+from pyt.contrib.playlist import Playlist
 from pyt.helpers import uniqueify
 
 logger = logging.getLogger(__name__)

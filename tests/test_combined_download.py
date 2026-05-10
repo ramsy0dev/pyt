@@ -188,9 +188,34 @@ def test_probe_duration_returns_none_when_ffprobe_missing(tmp_path):
 # ── StreamSet.best_pair ────────────────────────────────────────────────────
 
 
-def _make_video(legacy):
-    meta = _hydrate_meta(legacy, url=f"https://youtube.com/watch?v={legacy.video_id}")
-    return Video(legacy, meta=meta)
+def _make_video(cipher_signature):
+    from pyt.api._streams_hydrator import _RawStream
+    from pyt.api.streams import StreamSet
+    from pyt.api._sabr_config import _SabrConfig
+
+    pr = cipher_signature._vid_info
+    meta = _hydrate_meta(pr, url=f"https://youtube.com/watch?v={cipher_signature.video_id}")
+    video = Video(player_response=pr, meta=meta, client_name="ANDROID_VR", client_cfg={})
+    raw = [
+        _RawStream(itag=18, url="https://ex.com/18", mime_type="video/mp4",
+                   kind="video", subtype="mp4", video_codec="avc1", audio_codec="mp4a",
+                   is_adaptive=False, is_progressive=True, is_otf=False,
+                   bitrate=500000, filesize=5000000, filesize_approx=5000000,
+                   resolution="360p", fps=30, abr=None, default_filename="v.mp4"),
+        _RawStream(itag=136, url="https://ex.com/136", mime_type="video/mp4",
+                   kind="video", subtype="mp4", video_codec="avc1", audio_codec=None,
+                   is_adaptive=True, is_progressive=False, is_otf=False,
+                   bitrate=1500000, filesize=15000000, filesize_approx=15000000,
+                   resolution="720p", fps=30, abr=None, default_filename="v.mp4"),
+        _RawStream(itag=140, url="https://ex.com/140", mime_type="audio/mp4",
+                   kind="audio", subtype="mp4", video_codec=None, audio_codec="mp4a",
+                   is_adaptive=True, is_progressive=False, is_otf=False,
+                   bitrate=128000, filesize=3000000, filesize_approx=3000000,
+                   resolution=None, fps=None, abr="128kbps", default_filename="a.mp4"),
+    ]
+    video._streams = StreamSet._from_raw(raw, video=video)
+    video._sabr_config = _SabrConfig()
+    return video
 
 
 def test_best_pair_returns_adaptive_video_and_audio(cipher_signature):
@@ -276,21 +301,32 @@ def test_combined_download_rejects_progressive(cipher_signature):
 
 
 def _build_combined(cipher_signature, target_dir, *, video_size=64, audio_size=32):
-    """Build a CombinedDownload pinned to a tmp dir.
+    """Build a CombinedDownload with specific filesizes, pinned to a tmp dir."""
+    from pyt.api._streams_hydrator import _RawStream
+    from pyt.api.streams import StreamSet
+    from pyt.api._sabr_config import _SabrConfig
 
-    Pins expected sizes by writing directly to ``Stream._filesize`` (the
-    cached attribute behind the ``.filesize`` property) so the values
-    persist past this helper's frame. ``_pick_merge_container`` is
-    overridden to ``mkv`` so the ffmpeg invocation is predictable.
-    """
-    video = _make_video(cipher_signature)
-    v_stream = video.streams.video.adaptive.first()
-    a_stream = video.streams.audio.first()
-    if v_stream is None or a_stream is None:
-        pytest.skip("fixture missing the required adaptive video / audio stream")
+    pr = cipher_signature._vid_info
+    meta = _hydrate_meta(pr, url=f"https://youtube.com/watch?v={cipher_signature.video_id}")
+    video = Video(player_response=pr, meta=meta, client_name="ANDROID_VR", client_cfg={})
 
-    v_stream.legacy._filesize = video_size
-    a_stream.legacy._filesize = audio_size
+    v_raw = _RawStream(itag=136, url="https://ex.com/video", mime_type="video/mp4",
+                       kind="video", subtype="mp4", video_codec="avc1.4d401f",
+                       audio_codec=None, is_adaptive=True, is_progressive=False,
+                       is_otf=False, bitrate=1500000,
+                       filesize=video_size, filesize_approx=video_size,
+                       resolution="720p", fps=30, abr=None, default_filename="v.mp4")
+    a_raw = _RawStream(itag=140, url="https://ex.com/audio", mime_type="audio/mp4",
+                       kind="audio", subtype="mp4", video_codec=None,
+                       audio_codec="mp4a.40.2", is_adaptive=True, is_progressive=False,
+                       is_otf=False, bitrate=128000,
+                       filesize=audio_size, filesize_approx=audio_size,
+                       resolution=None, fps=None, abr="128kbps", default_filename="a.mp4")
+    video._streams = StreamSet._from_raw([v_raw, a_raw], video=video)
+    video._sabr_config = _SabrConfig()
+
+    v_stream = video._streams[0]
+    a_stream = video._streams[1]
 
     plan = CombinedDownload(
         video=video,
@@ -308,9 +344,9 @@ def test_run_drives_sabr_and_invokes_ffmpeg(cipher_signature, tmp_path):
         cipher_signature, tmp_path, video_size=10, audio_size=6
     )
     # Force a SABR URL so we actually exercise the multiplex path.
-    video.legacy.stream_monostate.sabr_url = "https://sabr.example/play"
-    video.legacy.stream_monostate.duration = 10
-    video.legacy.stream_monostate.po_token = None
+    video._sabr_config.sabr_url = "https://sabr.example/play"
+    video._sabr_config.duration = 10
+    video._sabr_config.po_token = None
 
     fake_session = mock.MagicMock()
     fake_session.iter_chunks.return_value = iter([
@@ -352,8 +388,8 @@ def test_run_falls_back_to_range_when_sabr_short(cipher_signature, tmp_path):
     video, v_stream, a_stream, plan = _build_combined(
         cipher_signature, tmp_path, video_size=10, audio_size=6
     )
-    video.legacy.stream_monostate.sabr_url = "https://sabr.example/play"
-    video.legacy.stream_monostate.duration = 10
+    video._sabr_config.sabr_url = "https://sabr.example/play"
+    video._sabr_config.duration = 10
 
     # SABR delivers only 4 video bytes and nothing for audio, then ends.
     fake_session = mock.MagicMock()
@@ -363,10 +399,10 @@ def test_run_falls_back_to_range_when_sabr_short(cipher_signature, tmp_path):
 
     # Range-stream returns the missing tails.
     def fake_stream(url, *, timeout, max_retries, start_byte, extra_headers):
-        if url == v_stream.legacy.url:
+        if url == v_stream.url:
             assert start_byte == 4
             yield b"V" * 6
-        elif url == a_stream.legacy.url:
+        elif url == a_stream.url:
             assert start_byte == 0
             yield b"A" * 6
         else:
@@ -395,13 +431,13 @@ def test_run_uses_range_only_when_no_sabr_url(cipher_signature, tmp_path):
     video, v_stream, a_stream, plan = _build_combined(
         cipher_signature, tmp_path, video_size=10, audio_size=6
     )
-    video.legacy.stream_monostate.sabr_url = None  # no SABR
+    video._sabr_config.sabr_url = None  # no SABR
 
     def fake_stream(url, *, timeout, max_retries, start_byte, extra_headers):
         assert start_byte == 0
-        if url == v_stream.legacy.url:
+        if url == v_stream.url:
             yield b"V" * 10
-        elif url == a_stream.legacy.url:
+        elif url == a_stream.url:
             yield b"A" * 6
         else:
             raise AssertionError(f"unexpected url {url!r}")
@@ -429,7 +465,7 @@ def test_run_then_chains_pipeline_steps(cipher_signature, tmp_path):
     video, v_stream, a_stream, plan = _build_combined(
         cipher_signature, tmp_path, video_size=2, audio_size=2
     )
-    video.legacy.stream_monostate.sabr_url = "https://sabr.example/play"
+    video._sabr_config.sabr_url = "https://sabr.example/play"
 
     fake_session = mock.MagicMock()
     fake_session.iter_chunks.return_value = iter([
@@ -467,7 +503,7 @@ def test_run_ffmpeg_failure_raises_download_error(cipher_signature, tmp_path):
     video, v_stream, a_stream, plan = _build_combined(
         cipher_signature, tmp_path, video_size=2, audio_size=2
     )
-    video.legacy.stream_monostate.sabr_url = "https://sabr.example/play"
+    video._sabr_config.sabr_url = "https://sabr.example/play"
 
     fake_session = mock.MagicMock()
     fake_session.iter_chunks.return_value = iter([
@@ -494,7 +530,7 @@ def test_run_ffmpeg_missing_raises_download_error(cipher_signature, tmp_path):
     video, v_stream, a_stream, plan = _build_combined(
         cipher_signature, tmp_path, video_size=2, audio_size=2
     )
-    video.legacy.stream_monostate.sabr_url = "https://sabr.example/play"
+    video._sabr_config.sabr_url = "https://sabr.example/play"
 
     fake_session = mock.MagicMock()
     fake_session.iter_chunks.return_value = iter([
@@ -515,10 +551,10 @@ def test_progress_callback_invoked_for_both_formats(cipher_signature, tmp_path):
     video, v_stream, a_stream, plan = _build_combined(
         cipher_signature, tmp_path, video_size=5, audio_size=4
     )
-    video.legacy.stream_monostate.sabr_url = "https://sabr.example/play"
+    video._sabr_config.sabr_url = "https://sabr.example/play"
 
     progress_events = []
-    video.legacy.stream_monostate.on_progress = (
+    video._sabr_config.on_progress = (
         lambda stream, chunk, remaining: progress_events.append(
             (stream.itag, len(chunk), remaining)
         )

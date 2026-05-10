@@ -10,7 +10,8 @@ from unittest.mock import (
 )
 from urllib.error import HTTPError
 
-from pyt import request, Stream
+from pyt import request
+from pyt.streams import Stream
 
 @mock.patch("pyt.streams.request")
 def test_stream_to_buffer(mock_request, cipher_signature):

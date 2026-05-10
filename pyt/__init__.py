@@ -1,33 +1,24 @@
-"""pyt — YouTube downloader for Python 3."""
+"""pyt — YouTube downloader for Python 3.
+
+v3: the legacy pytube API has been removed from the top-level namespace.
+Legacy symbols (YouTube, Stream, Caption, Playlist, etc.) are still
+importable from ``pyt.legacy`` through this release cycle:
+
+    from pyt.legacy import YouTube, Playlist, Channel, Search
+
+They emit a ``DeprecationWarning`` and will be removed in v4.
+"""
 __title__ = "pyt"
 __author__ = "ramsy0dev"
 __license__ = "MIT"
+
+# Module-level JS cache — used internally by pyt._legacy_archive.YouTube.
 __js__ = None
 __js_url__ = None
 
 from pyt.version import __version__
-from pyt.streams import Stream
-from pyt.captions import Caption
-from pyt.query import CaptionQuery, StreamQuery
-from pyt.__main__ import YouTube
-from pyt.contrib.playlist import Playlist
-from pyt.contrib.channel import Channel
-from pyt.contrib.search import Search
-from pyt.archive import DownloadArchive
-from pyt.template import OutputTemplate
-from pyt.postprocessors import (
-    AudioExtractor,
-    FFmpegMetadataEmbedder,
-    EmbedThumbnailPostProcessor,
-    EmbedSubtitlePostProcessor,
-    SponsorBlockPP,
-    PostProcessorError,
-)
 
-# Modern API — see pyt.api for the full surface. The legacy classes above
-# remain importable until the next major bump but emit DeprecationWarning.
-# Modern Playlist/ChannelFeed/SearchResults live under pyt.api to avoid
-# colliding with the legacy ``pyt.Playlist`` / ``pyt.Channel``.
+# Modern API — the only public surface in v3.
 from pyt.api import (
     Client,
     Video,
@@ -56,4 +47,16 @@ from pyt.api import (
     logging_enabled,
     diagnostic_report,
     TRACE,
+)
+
+# v2 post-processors and archive helpers remain importable directly.
+from pyt.archive import DownloadArchive
+from pyt.template import OutputTemplate
+from pyt.postprocessors import (
+    AudioExtractor,
+    FFmpegMetadataEmbedder,
+    EmbedThumbnailPostProcessor,
+    EmbedSubtitlePostProcessor,
+    SponsorBlockPP,
+    PostProcessorError,
 )
